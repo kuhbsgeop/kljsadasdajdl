@@ -26,6 +26,13 @@ DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
 DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
 ACME_SERVER="${ACME_SERVER:-letsencrypt}"
 ACME_FALLBACK_SERVER="${ACME_FALLBACK_SERVER:-zerossl}"
+REQUIRE_DOMAIN_ORIGIN="${REQUIRE_DOMAIN_ORIGIN:-1}"
+PUBLIC_IPV4="${PUBLIC_IPV4:-}"
+PUBLIC_IPV6="${PUBLIC_IPV6:-}"
+DETECTED_PUBLIC_IPV4=""
+DETECTED_PUBLIC_IPV6=""
+PUBLIC_IPV4_CHECKED=0
+PUBLIC_IPV6_CHECKED=0
 REQUESTED_DOMAIN_NAMES="${REQUESTED_DOMAIN_NAMES:-}"
 
 green=$'\033[0;32m'
@@ -129,6 +136,70 @@ domain_has_dns() {
   getent ahosts "$domain" >/dev/null 2>&1
 }
 
+detect_public_ipv4() {
+  [ -n "$PUBLIC_IPV4" ] && { printf '%s' "$PUBLIC_IPV4"; return; }
+  if [ "$PUBLIC_IPV4_CHECKED" = "1" ]; then
+    printf '%s' "$DETECTED_PUBLIC_IPV4"
+    return
+  fi
+  PUBLIC_IPV4_CHECKED=1
+  DETECTED_PUBLIC_IPV4="$(curl -4 -fsS --max-time 6 https://api.ipify.org 2>/dev/null || true)"
+  printf '%s' "$DETECTED_PUBLIC_IPV4"
+}
+
+detect_public_ipv6() {
+  [ -n "$PUBLIC_IPV6" ] && { printf '%s' "$PUBLIC_IPV6"; return; }
+  if [ "$PUBLIC_IPV6_CHECKED" = "1" ]; then
+    printf '%s' "$DETECTED_PUBLIC_IPV6"
+    return
+  fi
+  PUBLIC_IPV6_CHECKED=1
+  DETECTED_PUBLIC_IPV6="$(curl -6 -fsS --max-time 6 https://api64.ipify.org 2>/dev/null || true)"
+  printf '%s' "$DETECTED_PUBLIC_IPV6"
+}
+
+resolve_domain_a() {
+  local domain="$1"
+  if command -v dig >/dev/null 2>&1; then
+    dig +short A "$domain" | awk 'NF'
+  else
+    getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | awk 'NF && !seen[$0]++'
+  fi
+}
+
+resolve_domain_aaaa() {
+  local domain="$1"
+  if command -v dig >/dev/null 2>&1; then
+    dig +short AAAA "$domain" | awk 'NF'
+  else
+    getent ahostsv6 "$domain" 2>/dev/null | awk '{print $1}' | awk 'NF && !seen[$0]++'
+  fi
+}
+
+contains_line() {
+  local needle="$1"
+  grep -Fxq "$needle"
+}
+
+domain_points_to_origin() {
+  local domain="$1"
+  local ipv4 ipv6 a_records aaaa_records
+  truthy "$REQUIRE_DOMAIN_ORIGIN" || return 0
+  ipv4="$(detect_public_ipv4)"
+  a_records="$(resolve_domain_a "$domain" || true)"
+  if [ -n "$ipv4" ] && printf '%s\n' "$a_records" | contains_line "$ipv4"; then
+    return 0
+  fi
+  ipv6="$(detect_public_ipv6)"
+  [ -n "$ipv4$ipv6" ] || return 0
+  aaaa_records="$(resolve_domain_aaaa "$domain" || true)"
+  if [ -n "$ipv6" ] && printf '%s\n' "$aaaa_records" | contains_line "$ipv6"; then
+    return 0
+  fi
+  log "Skipping ${domain}: DNS does not point to this VPS. A=${a_records:-none} AAAA=${aaaa_records:-none} expected IPv4=${ipv4:-none} IPv6=${ipv6:-none}. Use DNS-only/direct records for proxy nodes." >&2
+  return 1
+}
+
 acme_ready_domains() {
   local domains="$1"
   local domain_parts=() d result="" sep=""
@@ -136,11 +207,11 @@ acme_ready_domains() {
   IFS=',' read -r -a domain_parts <<< "$domains"
   for d in "${domain_parts[@]}"; do
     [ -n "$d" ] || continue
-    if domain_has_dns "$d"; then
+    if ! domain_has_dns "$d"; then
+      log "Skipping ${d} for this certificate request: DNS A/AAAA record not found." >&2
+    elif domain_points_to_origin "$d"; then
       result="${result}${sep}${d}"
       sep=","
-    else
-      log "Skipping ${d} for this certificate request: DNS A/AAAA record not found." >&2
     fi
   done
   printf '%s' "$result"

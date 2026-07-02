@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 RECREATE_ON_DOMAIN_UPDATE=1 ENABLE_ACME=1 ACME_SERVER=letsencrypt ACME_FALLBACK_SERVER=zerossl STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_PROTOCOL_GUARD=1 REQUIRE_SECURE_TRANSPORT=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 RECREATE_ON_DOMAIN_UPDATE=1 ENABLE_ACME=1 ACME_SERVER=letsencrypt ACME_FALLBACK_SERVER=zerossl REQUIRE_DOMAIN_ORIGIN=1 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_PROTOCOL_GUARD=1 REQUIRE_SECURE_TRANSPORT=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 完整一键安装，没有域名时使用公网 IP + HTTP 入口：
@@ -61,6 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
       ENABLE_ACME=1 \
       ACME_SERVER=letsencrypt \
       ACME_FALLBACK_SERVER=zerossl \
+      REQUIRE_DOMAIN_ORIGIN=1 \
       STRICT_DOMAIN_CERT=0 \
       USE_DOMAIN_FOR_LINKS=1 \
       HTTPS_SITE_ENABLE=1 \
@@ -82,7 +83,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 如果不小心少写了逗号，例如把 `a.example.com,www.example.com` 写成 `a.example.com.www.example.com`，脚本会尽量自动拆成两个域名，避免后面的 `www`、`api`、`sub` 等前缀被当作一个不存在的长域名跳过。但仍建议手动用逗号分隔每个域名，避免 DNS 和证书结果不符合预期。
 
-脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。默认命令使用 `STRICT_DOMAIN_CERT=0`，会跳过 DNS/证书失败的域名继续执行，未覆盖的域名先放入 `PENDING_DOMAIN_NAMES`，避免 HTTPS 红锁。默认 `ACME_SERVER=letsencrypt`、`ACME_FALLBACK_SERVER=zerossl`，遇到 Let’s Encrypt 临时 `serverInternal/overloaded` 会尝试备用 CA；如果所有 CA 都失败，会保留 pending，稍后重新运行菜单 10。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1`，安装时传入几个已激活域名，就会为每个域名创建一个不同端口的 VLESS REALITY 入站节点和一个不同端口的 Trojan WS TLS 入站节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
+脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。默认命令使用 `STRICT_DOMAIN_CERT=0`，会跳过 DNS/证书失败的域名继续执行，未覆盖的域名先放入 `PENDING_DOMAIN_NAMES`，避免 HTTPS 红锁。默认 `REQUIRE_DOMAIN_ORIGIN=1`，只有 A/AAAA 解析到本 VPS 公网 IP 的域名才会激活节点；Cloudflare 橙云或解析到其他 IP 的域名会被跳过，修好 DNS 后再跑菜单 10。默认 `ACME_SERVER=letsencrypt`、`ACME_FALLBACK_SERVER=zerossl`，遇到 Let’s Encrypt 临时 `serverInternal/overloaded` 会尝试备用 CA；如果所有 CA 都失败，会保留 pending，稍后重新运行菜单 10。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1`，安装时传入几个已激活域名，就会为每个域名创建一个不同端口的 VLESS REALITY 入站节点和一个不同端口的 Trojan WS TLS 入站节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
 
 如果某个前缀后续补好了 DNS，运行下面任一命令即可把它追加进证书：
 
