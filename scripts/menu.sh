@@ -48,6 +48,7 @@ XUI_BUILTIN_SUB_PATH="${XUI_BUILTIN_SUB_PATH:-}"
 XUI_BUILTIN_JSON_PATH="${XUI_BUILTIN_JSON_PATH:-}"
 XUI_BUILTIN_CLASH_PATH="${XUI_BUILTIN_CLASH_PATH:-}"
 SERVER_ALIASES="${SERVER_ALIASES:-}"
+PENDING_DOMAIN_NAMES="${PENDING_DOMAIN_NAMES:-}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -484,31 +485,42 @@ protocol_presets_menu() {
 }
 
 domain_cert_menu() {
-  local domains email use_domain enable_trojan https_site
+  local domains email use_domain enable_trojan https_site requested_domains domain_default
   echo "${cyan}Acme 域名证书 / HTTPS / Trojan TLS 自动配置${plain}"
   echo "当前域名: ${DOMAIN_NAMES:-未配置}"
+  if [ -n "${PENDING_DOMAIN_NAMES:-}" ]; then
+    echo "待补证书域名: ${PENDING_DOMAIN_NAMES}"
+  fi
   echo "当前证书: ${TLS_CERT_FILE:-未配置}"
   echo
-  read -r -p "请输入域名，可多个，用逗号或空格分隔 [${DOMAIN_NAMES:-}]: " domains </dev/tty || domains=""
-  domains="${domains:-${DOMAIN_NAMES:-}}"
+  domain_default="$(
+    printf '%s\n' "${DOMAIN_NAMES:-}" "${PENDING_DOMAIN_NAMES:-}" \
+      | tr ',，;； ' '\n' \
+      | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="," }'
+  )"
+  read -r -p "请输入新增域名或完整域名列表，可多个，用逗号或空格分隔 [${domain_default:-}]: " domains </dev/tty || domains=""
+  domains="${domains:-${domain_default:-}}"
   if [ -z "$domains" ]; then
     echo "${yellow}未输入域名。${plain}"
     return 0
   fi
+  requested_domains="$domains"
   read -r -p "ACME邮箱 [${ACME_EMAIL:-admin@${domains%%,*}}]: " email </dev/tty || email=""
   read -r -p "是否用第一个域名作为节点/面板显示地址？[Y/n]: " use_domain </dev/tty || use_domain=""
   read -r -p "证书成功后是否自动启用 Trojan TLS 节点？[Y/n]: " enable_trojan </dev/tty || enable_trojan=""
   read -r -p "是否启用 443 HTTPS 伪装站点？会把 Reality 默认端口从443改到8443 [Y/n]: " https_site </dev/tty || https_site=""
 
-  set_env_var DOMAIN_NAMES "$domains"
   set_env_var ACME_EMAIL "${email:-${ACME_EMAIL:-admin@${domains%%,*}}}"
   set_env_var ENABLE_ACME "1"
   case "$use_domain" in n|N|no|NO|No) set_env_var USE_DOMAIN_FOR_LINKS "0" ;; *) set_env_var USE_DOMAIN_FOR_LINKS "1" ;; esac
   case "$enable_trojan" in n|N|no|NO|No) set_env_var AUTO_ENABLE_TROJAN "0" ;; *) set_env_var AUTO_ENABLE_TROJAN "1"; set_env_var ENABLE_TROJAN "1" ;; esac
   case "$https_site" in n|N|no|NO|No) set_env_var HTTPS_SITE_ENABLE "0"; set_env_var HTTPS_HTTP_MODE "reject" ;; *) set_env_var HTTPS_SITE_ENABLE "1"; set_env_var HTTPS_HTTP_MODE "redirect" ;; esac
+  set_env_var DOMAIN_NODE_MODE "1"
+  set_env_var DOMAIN_PORT_MODE "1"
+  set_env_var DOMAIN_PORT_STEP "${DOMAIN_PORT_STEP:-1}"
 
   refresh_env
-  ./scripts/domain-cert.sh
+  REQUESTED_DOMAIN_NAMES="$requested_domains" ./scripts/domain-cert.sh --auto
   refresh_env
   write_runtime_summary
 }

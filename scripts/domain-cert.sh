@@ -6,6 +6,8 @@ cd "$ROOT_DIR"
 
 [ -f .env ] || { echo ".env not found. Run install.sh first." >&2; exit 1; }
 
+REQUESTED_DOMAIN_NAMES="${REQUESTED_DOMAIN_NAMES:-}"
+
 set -a
 # shellcheck disable=SC1091
 . ./.env
@@ -22,6 +24,7 @@ DOMAIN_NODE_MODE="${DOMAIN_NODE_MODE:-1}"
 DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
 DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
 DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
+REQUESTED_DOMAIN_NAMES="${REQUESTED_DOMAIN_NAMES:-}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -90,6 +93,22 @@ domain_in_list() {
   local domain="$1"
   local domains="$2"
   printf ',%s,' "$domains" | grep -F ",${domain}," >/dev/null
+}
+
+domain_list_difference() {
+  local source="$1"
+  local exclude="$2"
+  local domain_parts=() d result="" sep=""
+
+  IFS=',' read -r -a domain_parts <<< "$source"
+  for d in "${domain_parts[@]}"; do
+    [ -n "$d" ] || continue
+    if ! domain_in_list "$d" "$exclude"; then
+      result="${result}${sep}${d}"
+      sep=","
+    fi
+  done
+  printf '%s' "$result"
 }
 
 domain_has_dns() {
@@ -386,6 +405,21 @@ cert_covers_domain() {
   printf '%s\n' "$sans" | grep -F "DNS:${domain}" >/dev/null
 }
 
+cert_covered_domains_from_list() {
+  local domains="$1"
+  local domain_parts=() d result="" sep=""
+
+  IFS=',' read -r -a domain_parts <<< "$domains"
+  for d in "${domain_parts[@]}"; do
+    [ -n "$d" ] || continue
+    if cert_covers_domain "$d"; then
+      result="${result}${sep}${d}"
+      sep=","
+    fi
+  done
+  printf '%s' "$result"
+}
+
 use_existing_cert() {
   local primary="$1"
   set_env_var TLS_CERT_FILE "/root/cert/domains/fullchain.pem"
@@ -531,19 +565,22 @@ secure_panel_for_https() {
 }
 
 main() {
-  local domains="${DOMAIN_NAMES:-}"
+  local domains="${REQUESTED_DOMAIN_NAMES:-${DOMAIN_NAMES:-}}"
   local primary email cert_domains cert_primary
   local old_domains="${DOMAIN_NAMES:-}"
   local old_aliases="${SERVER_ALIASES:-}"
   local old_server_addr="${SERVER_ADDR:-}"
   local old_tls_server_name="${TLS_SERVER_NAME:-}"
+  local old_pending_domains="${PENDING_DOMAIN_NAMES:-}"
   local old_https="${HTTPS_SITE_ENABLE:-0}"
   local old_use_domain="${USE_DOMAIN_FOR_LINKS:-1}"
-  local old_domain_values merged_domains
+  local old_domain_values merged_domains default_domains
+  local active_domains pending_domains covered_domains
 
   if [ "${1:-}" != "--auto" ]; then
     echo "${cyan}域名 / HTTPS 证书自动配置${plain}"
-    domains="$(prompt "请输入域名，可多个，用逗号或空格分隔" "$domains")"
+    default_domains="$(domain_values_without_ips "${DOMAIN_NAMES:-}" "${PENDING_DOMAIN_NAMES:-}")"
+    domains="$(prompt "请输入新增域名或完整域名列表，可多个，用逗号或空格分隔" "${default_domains:-$domains}")"
   fi
 
   domains="$(normalize_domains "$domains")"
@@ -552,8 +589,8 @@ main() {
     return 0
   fi
 
-  old_domain_values="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name")"
-  merged_domains="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name" "$domains")"
+  old_domain_values="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name" "$old_pending_domains")"
+  merged_domains="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name" "$old_pending_domains" "$domains")"
   [ -n "$merged_domains" ] && domains="$merged_domains"
 
   primary="$(first_domain "$domains")"
@@ -575,12 +612,6 @@ main() {
     return 1
   fi
 
-  set_env_var DOMAIN_NAMES "$domains"
-  set_env_var SERVER_ALIASES "$domains"
-  set_env_var TLS_SERVER_NAME "$cert_primary"
-  if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
-    set_env_var SERVER_ADDR "$primary"
-  fi
   DOMAIN_NAMES="$domains"
   SERVER_ALIASES="$domains"
   TLS_SERVER_NAME="$cert_primary"
@@ -634,13 +665,50 @@ main() {
     fi
   fi
 
-  if truthy "$STRICT_DOMAIN_CERT" && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
-    if ! cert_covers_domains "$domains"; then
-      log "STRICT_DOMAIN_CERT=1 requires the installed certificate to cover every configured domain."
-      log "Fix DNS/proxy records for all domains, then rerun the one-click command."
-      return 1
+  active_domains="$domains"
+  pending_domains=""
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    if cert_covers_domains "$domains"; then
+      active_domains="$domains"
+    else
+      covered_domains="$(cert_covered_domains_from_list "$domains")"
+      if truthy "$STRICT_DOMAIN_CERT"; then
+        log "STRICT_DOMAIN_CERT=1 requires the installed certificate to cover every configured domain."
+        log "Fix DNS/proxy records for all domains, then rerun the one-click command."
+        return 1
+      fi
+      if [ -n "$covered_domains" ]; then
+        active_domains="$covered_domains"
+        pending_domains="$(domain_list_difference "$domains" "$active_domains")"
+        log "Certificate does not cover every requested domain yet."
+        log "Active HTTPS domains: ${active_domains}"
+        log "Pending domains skipped for now: ${pending_domains}"
+        log "Fix DNS/proxy records for pending domains, then rerun x-ui option 10 or the domain one-click command."
+      else
+        log "No installed certificate covers the requested domains. HTTPS would be red, so no domain/node changes were activated."
+        log "Fix DNS/proxy records and rerun x-ui option 10 or the domain one-click command."
+        return 1
+      fi
     fi
   fi
+
+  domains="$active_domains"
+  primary="$(first_domain "$domains")"
+  cert_primary="$primary"
+  set_env_var DOMAIN_NAMES "$domains"
+  set_env_var SERVER_ALIASES "$domains"
+  set_env_var TLS_SERVER_NAME "$cert_primary"
+  if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
+    set_env_var SERVER_ADDR "$primary"
+  fi
+  DOMAIN_NAMES="$domains"
+  SERVER_ALIASES="$domains"
+  TLS_SERVER_NAME="$cert_primary"
+  if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
+    SERVER_ADDR="$primary"
+  fi
+  set_env_var PENDING_DOMAIN_NAMES "$pending_domains"
+  PENDING_DOMAIN_NAMES="$pending_domains"
 
   if [ "$AUTO_ENABLE_TROJAN" = "1" ]; then
     set_env_var ENABLE_TROJAN "1"
@@ -672,6 +740,9 @@ main() {
   echo "  订阅转换: $(web_origin "$primary")/sub/"
   if [ -n "${XUI_BUILTIN_SUB_PATH:-}" ]; then
     echo "  3X-UI内置订阅: $(web_origin "$primary")${XUI_BUILTIN_SUB_PATH}"
+  fi
+  if [ -n "$pending_domains" ]; then
+    echo "  待补证书域名: ${pending_domains}"
   fi
   echo "  HTTP模式: ${HTTPS_HTTP_MODE:-reject}"
   echo "  证书: ${ROOT_DIR}/data/cert/domains/fullchain.pem"
