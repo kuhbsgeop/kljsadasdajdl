@@ -6,7 +6,7 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 
 INSTALL_ENV_OVERRIDE_KEYS=(
   PANEL_PORT PANEL_LISTEN_IP WEB_BASE_PATH
-  DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE
+  DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
   ENABLE_ACME ACME_EMAIL STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
   ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA
   REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
@@ -108,6 +108,45 @@ domain_values_without_ips() {
         sep=","
       }
     '
+}
+
+truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|y|Y|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+normalize_list_lines() {
+  printf '%s' "$1" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++'
+}
+
+domain_node_values_for_ports() {
+  local values
+  if truthy "${DOMAIN_NODE_MODE:-1}"; then
+    values="${SERVER_ALIASES:-${DOMAIN_NAMES:-${SERVER_ADDR:-}}}"
+  else
+    values="${SERVER_ADDR:-}"
+  fi
+  normalize_list_lines "$values"
+}
+
+domain_reality_ports() {
+  local count base step i
+  if ! truthy "${DOMAIN_PORT_MODE:-1}"; then
+    printf '%s\n' "${REALITY_PORT:-443}"
+    return
+  fi
+  count="$(domain_node_values_for_ports | awk 'NF { count++ } END { print count + 0 }')"
+  [ "$count" -gt 0 ] || count=1
+  base="${DOMAIN_PORT_START:-${REALITY_PORT:-443}}"
+  step="${DOMAIN_PORT_STEP:-1}"
+  [[ "$base" =~ ^[0-9]+$ ]] || base="${REALITY_PORT:-443}"
+  [[ "$step" =~ ^[0-9]+$ ]] || step=1
+  [ "$step" -ge 1 ] || step=1
+  for ((i = 0; i < count; i++)); do
+    printf '%d\n' $((base + i * step))
+  done
 }
 
 need_root() {
@@ -225,8 +264,11 @@ configure_firewall_ports() {
   local ports=(
     "22/tcp"
     "80/tcp"
-    "${REALITY_PORT:-443}/tcp"
   )
+  local reality_port
+  while IFS= read -r reality_port; do
+    [ -n "$reality_port" ] && ports+=("${reality_port}/tcp")
+  done < <(domain_reality_ports)
 
   if [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ]; then
     ports+=("${PANEL_PORT:-2053}/tcp")
@@ -633,6 +675,8 @@ apply_existing_env_overrides() {
   ensure_env_var ENABLE_SUBCONVERTER "1"
   ensure_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
   ensure_env_var DOMAIN_NODE_MODE "1"
+  ensure_env_var DOMAIN_PORT_MODE "1"
+  ensure_env_var DOMAIN_PORT_STEP "1"
   ensure_env_var XUI_BUILTIN_SUB_ENABLE "1"
   ensure_env_var XUI_BUILTIN_ALL_NODES "1"
 
@@ -800,6 +844,9 @@ SUB_CONFIG_ADMIN_TOKEN=${SUB_CONFIG_ADMIN_TOKEN:-}
 SERVER_ALIASES=${SERVER_ALIASES:-${DOMAIN_NAMES:-${SERVER_ADDR:-${server_addr_default}}}}
 SUBSCRIPTION_EXPAND_ALIASES=${SUBSCRIPTION_EXPAND_ALIASES:-1}
 DOMAIN_NODE_MODE=${DOMAIN_NODE_MODE:-1}
+DOMAIN_PORT_MODE=${DOMAIN_PORT_MODE:-1}
+DOMAIN_PORT_START=${DOMAIN_PORT_START:-}
+DOMAIN_PORT_STEP=${DOMAIN_PORT_STEP:-1}
 XUI_API_BASE=${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT:-2053}/${base_path}}
 XUI_API_TOKEN=${XUI_API_TOKEN:-}
 XUI_BUILTIN_SUB_ENABLE=${XUI_BUILTIN_SUB_ENABLE:-1}
@@ -907,6 +954,8 @@ write_install_summary() {
   local access_url="$public_panel_url"
   local access_note="Panel is reachable directly from the public address above."
   local panel_urls="${INSTALL_DIR}/runtime/panel-public-urls.txt"
+  local reality_ports
+  reality_ports="$(domain_reality_ports | awk 'NF && !seen[$0]++ { printf "%s%s/tcp", sep, $0; sep=", " }')"
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     public_panel_url="https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
     access_url="$public_panel_url"
@@ -1009,7 +1058,7 @@ write_install_summary() {
   ./scripts/manage.sh backup
 
 8) Firewall reminder
-  Public: open ${REALITY_PORT:-443}/tcp for VLESS REALITY.
+  Public: open ${reality_ports:-${REALITY_PORT:-443}/tcp} for VLESS REALITY.
   Private: keep ${PANEL_PORT:-2053}/tcp closed to public internet when PANEL_LISTEN_IP=127.0.0.1.
 
 9) Autostart

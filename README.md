@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 完整一键安装，没有域名时使用公网 IP + HTTP 入口：
@@ -42,6 +42,10 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 如果已经是域名 HTTPS 模式，后续再增加域名，只需要把新域名写进 `DOMAIN_NAMES` 重新运行有域名命令。脚本会把旧域名和新域名合并去重，只新增缺少的域名节点，不会删除之前已经生成的域名节点。
 
+通过菜单 `sudo x-ui` -> `10. 管理 Acme 申请域名证书` 补域名也会执行同样的迁移逻辑：旧 IP/HTTP 自动节点会被清理，自动节点的分享地址会切到域名。
+
+默认 `DOMAIN_PORT_MODE=1`：每个域名会使用不同的 VLESS REALITY 端口建立独立节点。启用 HTTPS 站点时，Reality 默认从 `8443` 开始，然后按域名顺序使用 `8443,8444,8445...`。可以用 `DOMAIN_PORT_START=端口` 和 `DOMAIN_PORT_STEP=步长` 自定义起始端口和递增步长。
+
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
 
 ```bash
@@ -50,6 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
       CONFIG_WIZARD=0 \
       'DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com' \
       DOMAIN_NODE_MODE=1 \
+      DOMAIN_PORT_MODE=1 \
       ENABLE_ACME=1 \
       STRICT_DOMAIN_CERT=1 \
       USE_DOMAIN_FOR_LINKS=1 \
@@ -68,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 注意：`DOMAIN_NAMES=...` 必须作为一个完整参数传给 `env`。长域名列表请放在引号里，不要把逗号开头的下一段单独换到新行，否则 Shell 会把下一行当作命令执行。
 
-脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。默认 `DOMAIN_NODE_MODE=1`，安装时传入几个域名，就会在默认 VLESS REALITY 入站里创建几个客户端节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
+脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1`，安装时传入几个域名，就会为每个域名创建一个不同端口的 VLESS REALITY 入站节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
 
 如果某个前缀后续补好了 DNS，运行下面任一命令即可把它追加进证书：
 
@@ -247,7 +252,7 @@ https://your.domain/sub/config/3.5.yaml
 
 也就是你的订阅转换会继续按这份 `3.5.yaml` 的分流规则生成配置。
 
-最推荐给 Clash 使用的是这个渲染后的订阅链接，它会读取当前 all-nodes 节点，再把节点参数填入 `3.5.yaml` 的 `proxies:`，并保留原来的节点名称和下面所有分流规则。默认 `DOMAIN_NODE_MODE=1` 时，安装传入几个域名就创建几个 VLESS REALITY 客户端节点；如果节点数量超过模板里的默认名称，会自动追加 `@域名` 并同步写入自动选择、故障转移、负载均衡等分组：
+最推荐给 Clash 使用的是这个渲染后的订阅链接，它会读取当前 all-nodes 节点，再把节点参数填入 `3.5.yaml` 的 `proxies:`，并保留原来的节点名称和下面所有分流规则。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1` 时，安装传入几个域名就创建几个不同端口的 VLESS REALITY 域名节点；如果节点数量超过模板里的默认名称，会自动追加 `@域名` 并同步写入自动选择、故障转移、负载均衡等分组：
 
 ```text
 https://your.domain/subconfig-api/render/clash?token=<token>
@@ -408,7 +413,7 @@ Web 入口：
 https://your.domain/sub/
 ```
 
-在页面输入“规则编辑 Token”，点击“刷新全部入站链接”，会从 3X-UI 读取 all-nodes 订阅客户端。默认 `DOMAIN_NODE_MODE=1` 时，会把这些客户端按 `SERVER_ALIASES` 一对一映射成多个域名节点。`dokodemo-door/tunnel` 是转发入站，没有客户端订阅 URL。
+在页面输入“规则编辑 Token”，点击“刷新全部入站链接”，会从 3X-UI 读取 all-nodes 订阅客户端。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1` 时，会把这些客户端按 `SERVER_ALIASES` 一对一映射成多个域名 + 不同端口节点。`dokodemo-door/tunnel` 是转发入站，没有客户端订阅 URL。
 
 命令行刷新：
 

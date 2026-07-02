@@ -8,6 +8,7 @@ cd "$ROOT_DIR"
 
 OVERRIDE_KEYS=(
   XUI_CONTAINER PANEL_PORT WEB_BASE_PATH SERVER_ADDR DOMAIN_NAMES SERVER_ALIASES DOMAIN_NODE_MODE
+  DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
   REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
   ENABLE_HYSTERIA ENABLE_TROJAN ENABLE_SHADOWSOCKS ALLOW_SELF_SIGNED_TLS
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
@@ -44,6 +45,9 @@ SERVER_ADDR="${SERVER_ADDR:-}"
 DOMAIN_NAMES="${DOMAIN_NAMES:-}"
 SERVER_ALIASES="${SERVER_ALIASES:-}"
 DOMAIN_NODE_MODE="${DOMAIN_NODE_MODE:-1}"
+DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
+DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
+DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
 API_BASE="http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH#/}"
 
 mkdir -p runtime data/cert
@@ -233,18 +237,40 @@ domain_node_mode_active() {
   [ "$(truthy "${DOMAIN_NODE_MODE:-1}")" = "true" ] && [ "$(domain_node_count)" -gt 1 ]
 }
 
+domain_port_mode_active() {
+  [ "$(truthy "${DOMAIN_NODE_MODE:-1}")" = "true" ] && [ "$(truthy "${DOMAIN_PORT_MODE:-1}")" = "true" ]
+}
+
+domain_port_base() {
+  printf '%s' "${DOMAIN_PORT_START:-${REALITY_PORT:-443}}"
+}
+
+domain_port_for_index() {
+  local index="$1"
+  local base step
+  base="$(domain_port_base)"
+  step="${DOMAIN_PORT_STEP:-1}"
+  [[ "$base" =~ ^[0-9]+$ ]] || { echo "DOMAIN_PORT_START/REALITY_PORT must be numeric: ${base}" >&2; exit 1; }
+  [[ "$step" =~ ^[0-9]+$ ]] || { echo "DOMAIN_PORT_STEP must be numeric: ${step}" >&2; exit 1; }
+  [ "$step" -ge 1 ] || { echo "DOMAIN_PORT_STEP must be >= 1." >&2; exit 1; }
+  printf '%d' $((base + index * step))
+}
+
 safe_node_label() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/^-*//; s/-*$//; s/--*/-/g'
 }
 
 build_vless_domain_client_specs() {
-  local tmp domain safe email uuid sub_id
+  local tmp domain safe email uuid sub_id idx port
   tmp="$(mktemp)"
   sub_id="${ALL_NODES_SUB_ID:-$DEFAULT_SUB_ID}"
+  idx=0
   : > "$tmp"
 
   domain_node_values | while IFS= read -r domain; do
     [ -n "$domain" ] || continue
+    port="$(domain_port_for_index "$idx")"
+    idx=$((idx + 1))
     safe="$(safe_node_label "$domain")"
     [ -n "$safe" ] || safe="domain"
     email="me-vless-${safe}-${PRESET_CLIENT_SUFFIX}"
@@ -253,8 +279,9 @@ build_vless_domain_client_specs() {
       --arg domain "$domain" \
       --arg email "$email" \
       --arg uuid "$uuid" \
+      --argjson port "$port" \
       --arg subId "$sub_id" \
-      '{domain:$domain,email:$email,uuid:$uuid,subId:$subId}' >> "$tmp"
+      '{domain:$domain,email:$email,uuid:$uuid,port:$port,subId:$subId}' >> "$tmp"
   done
 
   if [ ! -s "$tmp" ]; then
@@ -263,8 +290,9 @@ build_vless_domain_client_specs() {
       --arg domain "${SERVER_ADDR:-YOUR_SERVER_IP}" \
       --arg email "$email" \
       --arg uuid "$(new_uuid)" \
+      --argjson port "$(domain_port_for_index 0)" \
       --arg subId "$sub_id" \
-      '{domain:$domain,email:$email,uuid:$uuid,subId:$subId}' >> "$tmp"
+      '{domain:$domain,email:$email,uuid:$uuid,port:$port,subId:$subId}' >> "$tmp"
   fi
 
   jq -s '.' "$tmp"
@@ -274,6 +302,7 @@ build_vless_domain_client_specs() {
 update_vless_domain_clients() {
   local remark="$1"
   local clients_json="$2"
+  local share_addr="${3:-${SERVER_ADDR:-}}"
   local resp payload id file
 
   resp="$(api_get "/panel/api/inbounds/list")"
@@ -282,7 +311,7 @@ update_vless_domain_clients() {
   payload="$(
     jq -c \
       --arg remark "$remark" \
-      --arg shareAddr "${SERVER_ADDR:-}" \
+      --arg shareAddr "$share_addr" \
       --argjson specs "$clients_json" '
       def obj:
         if type == "string" then (fromjson? // {}) else (. // {}) end;
@@ -340,6 +369,125 @@ update_vless_domain_clients() {
   api_post_json "/panel/api/inbounds/update/${id}" "$file" | jq .
 }
 
+write_vless_reality_per_domain() {
+  local keypair private_key public_key short_id server_names_json sni clients_json spec
+  local domain port remark file client_json safe base_port
+
+  clients_json="$(build_vless_domain_client_specs)"
+  server_names_json="$(csv_to_json_array "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
+  sni="$(first_csv "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
+  base_port="$(domain_port_base)"
+  if [ "${RECREATE_MANAGED_INBOUNDS:-0}" = "1" ] && [ "$base_port" != "443" ]; then
+    delete_inbound_by_remark "auto-vless-reality-443"
+  fi
+
+  while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    domain="$(printf '%s' "$spec" | jq -r '.domain')"
+    port="$(printf '%s' "$spec" | jq -r '.port')"
+    safe="$(safe_node_label "$domain")"
+    [ -n "$safe" ] || safe="domain"
+    remark="auto-vless-reality-${port}"
+    file="runtime/vless-reality-${port}-${safe}.json"
+    client_json="$(printf '%s' "$spec" | jq -s '.')"
+
+    keypair="$(api_get "/panel/api/server/getNewX25519Cert")"
+    private_key="$(printf '%s' "$keypair" | jq -r '.obj.privateKey')"
+    public_key="$(printf '%s' "$keypair" | jq -r '.obj.publicKey')"
+    short_id="$(rand_hex 8)"
+
+    jq -n \
+      --arg remark "$remark" \
+      --argjson port "$port" \
+      --arg shareAddr "$domain" \
+      --argjson clients "$client_json" \
+      --arg target "${REALITY_TARGET:-www.cloudflare.com:443}" \
+      --argjson serverNames "$server_names_json" \
+      --arg privateKey "$private_key" \
+      --arg publicKey "$public_key" \
+      --arg shortId "$short_id" \
+      --arg spiderX "${REALITY_SPIDER_X:-/}" \
+      '{
+        enable: true,
+        remark: $remark,
+        listen: "",
+        port: $port,
+        shareAddr: $shareAddr,
+        shareAddrStrategy: "custom",
+        protocol: "vless",
+        expiryTime: 0,
+        total: 0,
+        trafficReset: "never",
+        settings: {
+          clients: ($clients | map({
+            id: .uuid,
+            email: .email,
+            flow: "xtls-rprx-vision",
+            limitIp: 0,
+            totalGB: 0,
+            expiryTime: 0,
+            enable: true,
+            tgId: 0,
+            subId: .subId,
+            comment: ("domain-node:" + .domain + "; generated by 3xui-selfhost-kit"),
+            reset: 0
+          })),
+          decryption: "none",
+          encryption: "none",
+          fallbacks: []
+        },
+        streamSettings: {
+          network: "tcp",
+          tcpSettings: { header: { type: "none" } },
+          security: "reality",
+          realitySettings: {
+            show: false,
+            xver: 0,
+            target: $target,
+            serverNames: $serverNames,
+            privateKey: $privateKey,
+            minClientVer: "",
+            maxClientVer: "",
+            maxTimediff: 0,
+            shortIds: [$shortId],
+            mldsa65Seed: "",
+            settings: {
+              publicKey: $publicKey,
+              fingerprint: "chrome",
+              serverName: "",
+              spiderX: $spiderX,
+              mldsa65Verify: ""
+            }
+          }
+        },
+        sniffing: {
+          enabled: true,
+          destOverride: ["http", "tls", "quic", "fakedns"],
+          metadataOnly: false,
+          routeOnly: false,
+          ipsExcluded: [],
+          domainsExcluded: []
+        }
+      }' > "$file"
+
+    recreate_inbound_if_requested "$remark"
+    if add_inbound_if_missing "$remark" "$file"; then
+      {
+        echo "VLESS REALITY"
+        printf '%s\n' "$spec" | jq -r \
+          --arg publicKey "$public_key" \
+          --arg sni "$sni" \
+          --arg shortId "$short_id" \
+          --arg remark "$remark" \
+          '"vless://\(.uuid)@\(.domain):\(.port)?type=tcp&security=reality&pbk=\($publicKey)&fp=chrome&sni=\($sni)&sid=\($shortId)&spx=%2F&flow=xtls-rprx-vision#\($remark)@\(.domain)"'
+        echo
+      } >> runtime/client-links.txt
+    else
+      update_vless_domain_clients "$remark" "$client_json" "$domain" || true
+    fi
+  done < <(printf '%s' "$clients_json" | jq -c '.[]')
+}
+
 ensure_self_signed_cert() {
   local cert="data/cert/selfsigned.crt"
   local key="data/cert/selfsigned.key"
@@ -355,6 +503,11 @@ ensure_self_signed_cert() {
 }
 
 write_vless_reality() {
+  if domain_port_mode_active; then
+    write_vless_reality_per_domain
+    return
+  fi
+
   local remark="auto-vless-reality-${REALITY_PORT:-443}"
   local keypair private_key public_key short_id sub_id server_names_json sni file clients_json
 

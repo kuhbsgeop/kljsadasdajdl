@@ -18,6 +18,10 @@ AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-1}"
 HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
 HTTPS_HTTP_MODE="${HTTPS_HTTP_MODE:-reject}"
 STRICT_DOMAIN_CERT="${STRICT_DOMAIN_CERT:-0}"
+DOMAIN_NODE_MODE="${DOMAIN_NODE_MODE:-1}"
+DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
+DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
+DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -61,6 +65,21 @@ set_env_var() {
 
 normalize_domains() {
   printf '%s' "$1" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="," }'
+}
+
+contains_ipv4_value() {
+  printf '%s' "$1" | tr ',，;； ' '\n' | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+}
+
+domain_values_without_ips() {
+  printf '%s\n' "$@" \
+    | tr ',，;； ' '\n' \
+    | awk '
+      NF && $0 !~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/ && $0 !~ /^[0-9A-Fa-f:]+$/ && !seen[$0]++ {
+        printf "%s%s", sep, $0
+        sep=","
+      }
+    '
 }
 
 first_domain() {
@@ -401,8 +420,11 @@ configure_firewall_ports() {
   local ports=(
     "22/tcp"
     "${SITE_HTTP_PORT:-80}/tcp"
-    "${REALITY_PORT:-443}/tcp"
   )
+  local reality_port
+  while IFS= read -r reality_port; do
+    [ -n "$reality_port" ] && ports+=("${reality_port}/tcp")
+  done < <(domain_reality_ports)
 
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     ports+=("${SITE_HTTPS_PORT:-443}/tcp")
@@ -439,6 +461,34 @@ configure_firewall_ports() {
   else
     log "No ufw/firewalld detected; make sure these ports are allowed by your VPS firewall: ${ports[*]}"
   fi
+}
+
+domain_node_values_for_ports() {
+  local values
+  if truthy "${DOMAIN_NODE_MODE:-1}"; then
+    values="${SERVER_ALIASES:-${DOMAIN_NAMES:-${SERVER_ADDR:-}}}"
+  else
+    values="${SERVER_ADDR:-}"
+  fi
+  printf '%s' "$values" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++'
+}
+
+domain_reality_ports() {
+  local count base step i
+  if ! truthy "${DOMAIN_PORT_MODE:-1}"; then
+    printf '%s\n' "${REALITY_PORT:-443}"
+    return
+  fi
+  count="$(domain_node_values_for_ports | awk 'NF { count++ } END { print count + 0 }')"
+  [ "$count" -gt 0 ] || count=1
+  base="${DOMAIN_PORT_START:-${REALITY_PORT:-443}}"
+  step="${DOMAIN_PORT_STEP:-1}"
+  [[ "$base" =~ ^[0-9]+$ ]] || base="${REALITY_PORT:-443}"
+  [[ "$step" =~ ^[0-9]+$ ]] || step=1
+  [ "$step" -ge 1 ] || step=1
+  for ((i = 0; i < count; i++)); do
+    printf '%d\n' $((base + i * step))
+  done
 }
 
 web_origin() {
@@ -483,6 +533,13 @@ secure_panel_for_https() {
 main() {
   local domains="${DOMAIN_NAMES:-}"
   local primary email cert_domains cert_primary
+  local old_domains="${DOMAIN_NAMES:-}"
+  local old_aliases="${SERVER_ALIASES:-}"
+  local old_server_addr="${SERVER_ADDR:-}"
+  local old_tls_server_name="${TLS_SERVER_NAME:-}"
+  local old_https="${HTTPS_SITE_ENABLE:-0}"
+  local old_use_domain="${USE_DOMAIN_FOR_LINKS:-1}"
+  local old_domain_values merged_domains
 
   if [ "${1:-}" != "--auto" ]; then
     echo "${cyan}域名 / HTTPS 证书自动配置${plain}"
@@ -494,6 +551,10 @@ main() {
     echo "${yellow}未配置域名，已跳过。${plain}"
     return 0
   fi
+
+  old_domain_values="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name")"
+  merged_domains="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name" "$domains")"
+  [ -n "$merged_domains" ] && domains="$merged_domains"
 
   primary="$(first_domain "$domains")"
   email="${ACME_EMAIL:-admin@${primary}}"
@@ -520,10 +581,27 @@ main() {
   if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
     set_env_var SERVER_ADDR "$primary"
   fi
+  DOMAIN_NAMES="$domains"
+  SERVER_ALIASES="$domains"
+  TLS_SERVER_NAME="$cert_primary"
+  if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
+    SERVER_ADDR="$primary"
+  fi
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ "${REALITY_PORT:-443}" = "443" ]; then
     log "HTTPS site needs 443, moving VLESS Reality to 8443."
     set_env_var REALITY_PORT "8443"
     REALITY_PORT="8443"
+  fi
+  set_env_var DOMAIN_PORT_MODE "${DOMAIN_PORT_MODE:-1}"
+  set_env_var DOMAIN_PORT_STEP "${DOMAIN_PORT_STEP:-1}"
+  DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
+  DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
+  if [ "${RECREATE_MANAGED_INBOUNDS+x}" != "x" ]; then
+    if [ -z "$old_domain_values" ] || [ "$old_https" != "1" ] || [ "$old_use_domain" != "1" ] || contains_ipv4_value "$old_aliases" || contains_ipv4_value "$old_server_addr"; then
+      RECREATE_MANAGED_INBOUNDS=1
+      export RECREATE_MANAGED_INBOUNDS
+      log "Domain migration detected; managed inbounds will be rebuilt to remove old IP/HTTP nodes."
+    fi
   fi
 
   if [ "${1:-}" != "--auto" ]; then
@@ -573,7 +651,7 @@ main() {
   secure_panel_for_https
 
   if [ "${APPLY_AFTER_DOMAIN:-1}" = "1" ] && docker inspect "$XUI_CONTAINER" >/dev/null 2>&1; then
-    ENABLE_TROJAN="${ENABLE_TROJAN:-0}" ./scripts/apply-presets.sh || true
+    ENABLE_TROJAN="${ENABLE_TROJAN:-0}" RECREATE_MANAGED_INBOUNDS="${RECREATE_MANAGED_INBOUNDS:-0}" ./scripts/apply-presets.sh || true
   fi
 
   start_mask_site
@@ -590,6 +668,7 @@ main() {
   echo "  域名: ${domains}"
   echo "  主域名: ${primary}"
   echo "  Web入口: $(web_origin "$primary")/"
+  echo "  VLESS Reality端口: $(domain_reality_ports | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep=", " }')"
   echo "  订阅转换: $(web_origin "$primary")/sub/"
   if [ -n "${XUI_BUILTIN_SUB_PATH:-}" ]; then
     echo "  3X-UI内置订阅: $(web_origin "$primary")${XUI_BUILTIN_SUB_PATH}"
