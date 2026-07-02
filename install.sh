@@ -66,6 +66,12 @@ env_has_key() {
   grep -q "^${key}=" "$env_file" 2>/dev/null
 }
 
+env_value() {
+  local key="$1"
+  local env_file="${2:-.env}"
+  awk -F= -v k="$key" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$env_file" 2>/dev/null || true
+}
+
 ensure_env_var() {
   local key="$1"
   local value="$2"
@@ -87,6 +93,21 @@ install_override_value() {
 
 first_domain() {
   printf '%s' "$1" | awk -F'[,，;；[:space:]]+' '{print $1}'
+}
+
+contains_ipv4_value() {
+  printf '%s' "$1" | tr ',，;； ' '\n' | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+}
+
+domain_values_without_ips() {
+  printf '%s\n' "$@" \
+    | tr ',，;； ' '\n' \
+    | awk '
+      NF && $0 !~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/ && $0 !~ /^[0-9A-Fa-f:]+$/ && !seen[$0]++ {
+        printf "%s%s", sep, $0
+        sep=","
+      }
+    '
 }
 
 need_root() {
@@ -523,6 +544,16 @@ apply_existing_env_overrides() {
   [ -f .env ] || return 0
 
   local key value domains primary all_nodes_sub_id default_sub_id server_addr_default
+  local old_domains old_https old_use_domain old_aliases old_server_addr old_tls_server_name old_domain_values
+  local requested_domains requested_aliases merged_domains selected_server_addr selected_tls_server_name
+  old_domains="$(env_value DOMAIN_NAMES)"
+  old_https="$(env_value HTTPS_SITE_ENABLE)"
+  old_use_domain="$(env_value USE_DOMAIN_FOR_LINKS)"
+  old_aliases="$(env_value SERVER_ALIASES)"
+  old_server_addr="$(env_value SERVER_ADDR)"
+  old_tls_server_name="$(env_value TLS_SERVER_NAME)"
+  old_domain_values="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name")"
+
   for key in "${INSTALL_ENV_OVERRIDE_KEYS[@]}"; do
     if has_install_override "$key"; then
       value="$(install_override_value "$key")"
@@ -532,13 +563,49 @@ apply_existing_env_overrides() {
   done
 
   if has_install_override DOMAIN_NAMES; then
-    domains="$(install_override_value DOMAIN_NAMES)"
+    requested_domains="$(install_override_value DOMAIN_NAMES)"
+    requested_aliases="$(
+      if has_install_override SERVER_ALIASES; then
+        install_override_value SERVER_ALIASES
+      else
+        printf '%s' "$requested_domains"
+      fi
+    )"
+    domains="$requested_domains"
     primary="$(first_domain "$domains")"
     if [ -n "$domains" ]; then
-      has_install_override SERVER_ALIASES || set_env_var SERVER_ALIASES "$domains"
+      merged_domains="$(domain_values_without_ips "$old_domains" "$old_aliases" "$old_server_addr" "$old_tls_server_name" "$requested_domains" "$requested_aliases")"
+      [ -n "$merged_domains" ] || merged_domains="$requested_domains"
+      domains="$merged_domains"
+      primary="$(first_domain "$domains")"
+      set_env_var DOMAIN_NAMES "$domains"
+      set_env_var SERVER_ALIASES "$domains"
       if [ -n "$primary" ]; then
-        has_install_override SERVER_ADDR || set_env_var SERVER_ADDR "$primary"
-        has_install_override TLS_SERVER_NAME || set_env_var TLS_SERVER_NAME "$primary"
+        selected_server_addr="$primary"
+        if ! contains_ipv4_value "$old_server_addr" && [ -n "$old_server_addr" ]; then
+          selected_server_addr="$old_server_addr"
+        fi
+        if has_install_override SERVER_ADDR; then
+          selected_server_addr="$(install_override_value SERVER_ADDR)"
+          [ -n "$selected_server_addr" ] || selected_server_addr="$primary"
+        fi
+        set_env_var SERVER_ADDR "$selected_server_addr"
+
+        selected_tls_server_name="$selected_server_addr"
+        if ! contains_ipv4_value "$old_tls_server_name" && [ -n "$old_tls_server_name" ]; then
+          selected_tls_server_name="$old_tls_server_name"
+        fi
+        if has_install_override TLS_SERVER_NAME; then
+          selected_tls_server_name="$(install_override_value TLS_SERVER_NAME)"
+          [ -n "$selected_tls_server_name" ] || selected_tls_server_name="$selected_server_addr"
+        fi
+        if contains_ipv4_value "$selected_tls_server_name"; then
+          selected_tls_server_name="$selected_server_addr"
+        fi
+        if contains_ipv4_value "$selected_tls_server_name"; then
+          selected_tls_server_name="$primary"
+        fi
+        set_env_var TLS_SERVER_NAME "$selected_tls_server_name"
       fi
       has_install_override ENABLE_ACME || set_env_var ENABLE_ACME "1"
       has_install_override STRICT_DOMAIN_CERT || set_env_var STRICT_DOMAIN_CERT "1"
@@ -552,6 +619,13 @@ apply_existing_env_overrides() {
       has_install_override DOMAIN_NODE_MODE || set_env_var DOMAIN_NODE_MODE "1"
       has_install_override XUI_BUILTIN_SUB_ENABLE || set_env_var XUI_BUILTIN_SUB_ENABLE "1"
       has_install_override XUI_BUILTIN_ALL_NODES || set_env_var XUI_BUILTIN_ALL_NODES "1"
+      if [ "${RECREATE_MANAGED_INBOUNDS+x}" != "x" ]; then
+        if [ -z "$old_domain_values" ] || [ "$old_https" != "1" ] || [ "$old_use_domain" != "1" ]; then
+          RECREATE_MANAGED_INBOUNDS=1
+          export RECREATE_MANAGED_INBOUNDS
+          log "Domain migration detected; managed inbounds will be rebuilt to remove old IP/HTTP nodes."
+        fi
+      fi
       log "Domain one-click mode enabled for existing install: ${domains}"
     fi
   fi

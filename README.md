@@ -38,6 +38,10 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 上面两条完整命令都可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码和数据库，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后按当前模式刷新 Caddy、刷新 `/sub/`、`/forward/` 和 3X-UI 内置 `all-nodes` 订阅。
 
+如果之前按“无域名公网 IP + HTTP 入口”安装，现在补域名切到 HTTPS，直接运行有域名命令即可。脚本会自动过滤旧的 IP 别名，必要时重建脚本自动管理的 VLESS / Shadowsocks / Trojan / Hysteria 入站，去掉旧的 IP/HTTP 分享节点，重新生成 `https://域名/...` 的面板、订阅和域名节点；手动创建的入站不会按 remark 自动删除。
+
+如果已经是域名 HTTPS 模式，后续再增加域名，只需要把新域名写进 `DOMAIN_NAMES` 重新运行有域名命令。脚本会把旧域名和新域名合并去重，只新增缺少的域名节点，不会删除之前已经生成的域名节点。
+
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
 
 ```bash
