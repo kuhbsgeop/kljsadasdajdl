@@ -7,6 +7,7 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 INSTALL_ENV_OVERRIDE_KEYS=(
   PANEL_PORT PANEL_LISTEN_IP WEB_BASE_PATH
   DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
+  RECREATE_ON_DOMAIN_UPDATE RECREATE_MANAGED_INBOUNDS
   ENABLE_ACME ACME_EMAIL STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
   ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA
   REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
@@ -16,6 +17,7 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY DOKODEMO_FORWARDS
   ENABLE_SUBCONVERTER SUBSCRIPTION_EXPAND_ALIASES
   XUI_BUILTIN_SUB_ENABLE XUI_BUILTIN_ALL_NODES XUI_BUILTIN_JSON_ENABLE XUI_BUILTIN_CLASH_ENABLE
+  ENABLE_PROTOCOL_GUARD PROTOCOL_GUARD_ACTION SAFE_PROTOCOLS REQUIRE_SECURE_TRANSPORT
 )
 
 for key in "${INSTALL_ENV_OVERRIDE_KEYS[@]}"; do
@@ -142,6 +144,24 @@ domain_reality_ports() {
   base="${DOMAIN_PORT_START:-${REALITY_PORT:-443}}"
   step="${DOMAIN_PORT_STEP:-1}"
   [[ "$base" =~ ^[0-9]+$ ]] || base="${REALITY_PORT:-443}"
+  [[ "$step" =~ ^[0-9]+$ ]] || step=1
+  [ "$step" -ge 1 ] || step=1
+  for ((i = 0; i < count; i++)); do
+    printf '%d\n' $((base + i * step))
+  done
+}
+
+domain_trojan_ports() {
+  local count base step i
+  if ! truthy "${DOMAIN_PORT_MODE:-1}"; then
+    printf '%s\n' "${TROJAN_PORT:-9443}"
+    return
+  fi
+  count="$(domain_node_values_for_ports | awk 'NF { count++ } END { print count + 0 }')"
+  [ "$count" -gt 0 ] || count=1
+  base="${TROJAN_PORT:-9443}"
+  step="${DOMAIN_PORT_STEP:-1}"
+  [[ "$base" =~ ^[0-9]+$ ]] || base="${TROJAN_PORT:-9443}"
   [[ "$step" =~ ^[0-9]+$ ]] || step=1
   [ "$step" -ge 1 ] || step=1
   for ((i = 0; i < count; i++)); do
@@ -277,7 +297,10 @@ configure_firewall_ports() {
     ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
   fi
   if [ "${ENABLE_TROJAN:-0}" = "1" ]; then
-    ports+=("${TROJAN_PORT:-9443}/tcp")
+    local trojan_port
+    while IFS= read -r trojan_port; do
+      [ -n "$trojan_port" ] && ports+=("${trojan_port}/tcp")
+    done < <(domain_trojan_ports)
   fi
   if [ "${ENABLE_HYSTERIA:-0}" = "1" ]; then
     ports+=("${HYSTERIA_PORT:-8443}/udp")
@@ -650,7 +673,7 @@ apply_existing_env_overrides() {
         set_env_var TLS_SERVER_NAME "$selected_tls_server_name"
       fi
       has_install_override ENABLE_ACME || set_env_var ENABLE_ACME "1"
-      has_install_override STRICT_DOMAIN_CERT || set_env_var STRICT_DOMAIN_CERT "1"
+      has_install_override STRICT_DOMAIN_CERT || set_env_var STRICT_DOMAIN_CERT "0"
       has_install_override USE_DOMAIN_FOR_LINKS || set_env_var USE_DOMAIN_FOR_LINKS "1"
       has_install_override HTTPS_SITE_ENABLE || set_env_var HTTPS_SITE_ENABLE "1"
       has_install_override HTTPS_HTTP_MODE || set_env_var HTTPS_HTTP_MODE "redirect"
@@ -659,6 +682,11 @@ apply_existing_env_overrides() {
       has_install_override ENABLE_SUBCONVERTER || set_env_var ENABLE_SUBCONVERTER "1"
       has_install_override SUBSCRIPTION_EXPAND_ALIASES || set_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
       has_install_override DOMAIN_NODE_MODE || set_env_var DOMAIN_NODE_MODE "1"
+      has_install_override RECREATE_ON_DOMAIN_UPDATE || set_env_var RECREATE_ON_DOMAIN_UPDATE "1"
+      has_install_override RECREATE_MANAGED_INBOUNDS || set_env_var RECREATE_MANAGED_INBOUNDS "1"
+      has_install_override ENABLE_PROTOCOL_GUARD || set_env_var ENABLE_PROTOCOL_GUARD "1"
+      has_install_override PROTOCOL_GUARD_ACTION || set_env_var PROTOCOL_GUARD_ACTION "disable"
+      has_install_override REQUIRE_SECURE_TRANSPORT || set_env_var REQUIRE_SECURE_TRANSPORT "1"
       has_install_override XUI_BUILTIN_SUB_ENABLE || set_env_var XUI_BUILTIN_SUB_ENABLE "1"
       has_install_override XUI_BUILTIN_ALL_NODES || set_env_var XUI_BUILTIN_ALL_NODES "1"
       if [ "${RECREATE_MANAGED_INBOUNDS+x}" != "x" ]; then
@@ -677,6 +705,7 @@ apply_existing_env_overrides() {
   ensure_env_var DOMAIN_NODE_MODE "1"
   ensure_env_var DOMAIN_PORT_MODE "1"
   ensure_env_var DOMAIN_PORT_STEP "1"
+  ensure_env_var RECREATE_ON_DOMAIN_UPDATE "1"
   ensure_env_var XUI_BUILTIN_SUB_ENABLE "1"
   ensure_env_var XUI_BUILTIN_ALL_NODES "1"
 
@@ -753,9 +782,6 @@ write_env() {
     if [ "${ENABLE_ACME+x}" != "x" ]; then
       enable_acme_default=1
     fi
-    if [ "${STRICT_DOMAIN_CERT+x}" != "x" ]; then
-      strict_domain_default=1
-    fi
     if [ "${USE_DOMAIN_FOR_LINKS+x}" != "x" ]; then
       use_domain_default=1
     fi
@@ -811,6 +837,7 @@ DOKODEMO_FORWARDS=
 SAFE_PROTOCOLS=${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}
 PROTOCOL_GUARD_ACTION=${PROTOCOL_GUARD_ACTION:-disable}
 ENABLE_PROTOCOL_GUARD=${ENABLE_PROTOCOL_GUARD:-1}
+REQUIRE_SECURE_TRANSPORT=${REQUIRE_SECURE_TRANSPORT:-${https_site_default}}
 
 CHAIN_ENABLED=${CHAIN_ENABLED:-0}
 CHAIN_MODE=${CHAIN_MODE:-manual}
@@ -847,6 +874,8 @@ DOMAIN_NODE_MODE=${DOMAIN_NODE_MODE:-1}
 DOMAIN_PORT_MODE=${DOMAIN_PORT_MODE:-1}
 DOMAIN_PORT_START=${DOMAIN_PORT_START:-}
 DOMAIN_PORT_STEP=${DOMAIN_PORT_STEP:-1}
+RECREATE_ON_DOMAIN_UPDATE=${RECREATE_ON_DOMAIN_UPDATE:-1}
+RECREATE_MANAGED_INBOUNDS=${RECREATE_MANAGED_INBOUNDS:-0}
 XUI_API_BASE=${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT:-2053}/${base_path}}
 XUI_API_TOKEN=${XUI_API_TOKEN:-}
 XUI_BUILTIN_SUB_ENABLE=${XUI_BUILTIN_SUB_ENABLE:-1}
@@ -954,8 +983,9 @@ write_install_summary() {
   local access_url="$public_panel_url"
   local access_note="Panel is reachable directly from the public address above."
   local panel_urls="${INSTALL_DIR}/runtime/panel-public-urls.txt"
-  local reality_ports
+  local reality_ports trojan_ports
   reality_ports="$(domain_reality_ports | awk 'NF && !seen[$0]++ { printf "%s%s/tcp", sep, $0; sep=", " }')"
+  trojan_ports="$(domain_trojan_ports | awk 'NF && !seen[$0]++ { printf "%s%s/tcp", sep, $0; sep=", " }')"
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     public_panel_url="https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
     access_url="$public_panel_url"
@@ -1059,6 +1089,7 @@ write_install_summary() {
 
 8) Firewall reminder
   Public: open ${reality_ports:-${REALITY_PORT:-443}/tcp} for VLESS REALITY.
+  Public: open ${trojan_ports:-${TROJAN_PORT:-9443}/tcp} for Trojan WS TLS when Trojan is enabled.
   Private: keep ${PANEL_PORT:-2053}/tcp closed to public internet when PANEL_LISTEN_IP=127.0.0.1.
 
 9) Autostart

@@ -485,8 +485,8 @@ protocol_presets_menu() {
 }
 
 domain_cert_menu() {
-  local domains email use_domain enable_trojan https_site requested_domains domain_default
-  echo "${cyan}Acme 域名证书 / HTTPS / Trojan TLS 自动配置${plain}"
+  local domains requested_domains domain_default
+  echo "${cyan}Acme 域名证书 / HTTPS / 安全节点自动配置${plain}"
   echo "当前域名: ${DOMAIN_NAMES:-未配置}"
   if [ -n "${PENDING_DOMAIN_NAMES:-}" ]; then
     echo "待补证书域名: ${PENDING_DOMAIN_NAMES}"
@@ -505,22 +505,26 @@ domain_cert_menu() {
     return 0
   fi
   requested_domains="$domains"
-  read -r -p "ACME邮箱 [${ACME_EMAIL:-admin@${domains%%,*}}]: " email </dev/tty || email=""
-  read -r -p "是否用第一个域名作为节点/面板显示地址？[Y/n]: " use_domain </dev/tty || use_domain=""
-  read -r -p "证书成功后是否自动启用 Trojan TLS 节点？[Y/n]: " enable_trojan </dev/tty || enable_trojan=""
-  read -r -p "是否启用 443 HTTPS 伪装站点？会把 Reality 默认端口从443改到8443 [Y/n]: " https_site </dev/tty || https_site=""
+  echo "${yellow}将自动启用 HTTPS、域名分享地址、VLESS Reality、Trojan WS TLS、协议守护，并重建全部自动域名节点。${plain}"
 
-  set_env_var ACME_EMAIL "${email:-${ACME_EMAIL:-admin@${domains%%,*}}}"
+  set_env_var ACME_EMAIL "${ACME_EMAIL:-admin@${domains%%,*}}"
   set_env_var ENABLE_ACME "1"
-  case "$use_domain" in n|N|no|NO|No) set_env_var USE_DOMAIN_FOR_LINKS "0" ;; *) set_env_var USE_DOMAIN_FOR_LINKS "1" ;; esac
-  case "$enable_trojan" in n|N|no|NO|No) set_env_var AUTO_ENABLE_TROJAN "0" ;; *) set_env_var AUTO_ENABLE_TROJAN "1"; set_env_var ENABLE_TROJAN "1" ;; esac
-  case "$https_site" in n|N|no|NO|No) set_env_var HTTPS_SITE_ENABLE "0"; set_env_var HTTPS_HTTP_MODE "reject" ;; *) set_env_var HTTPS_SITE_ENABLE "1"; set_env_var HTTPS_HTTP_MODE "redirect" ;; esac
+  set_env_var USE_DOMAIN_FOR_LINKS "1"
+  set_env_var AUTO_ENABLE_TROJAN "1"
+  set_env_var ENABLE_TROJAN "1"
+  set_env_var HTTPS_SITE_ENABLE "1"
+  set_env_var HTTPS_HTTP_MODE "redirect"
   set_env_var DOMAIN_NODE_MODE "1"
   set_env_var DOMAIN_PORT_MODE "1"
   set_env_var DOMAIN_PORT_STEP "${DOMAIN_PORT_STEP:-1}"
+  set_env_var RECREATE_MANAGED_INBOUNDS "1"
+  set_env_var ENABLE_PROTOCOL_GUARD "1"
+  set_env_var PROTOCOL_GUARD_ACTION "disable"
+  set_env_var SAFE_PROTOCOLS "${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}"
+  set_env_var REQUIRE_SECURE_TRANSPORT "1"
 
   refresh_env
-  REQUESTED_DOMAIN_NAMES="$requested_domains" ./scripts/domain-cert.sh --auto
+  RECREATE_MANAGED_INBOUNDS=1 REQUIRE_SECURE_TRANSPORT=1 REQUESTED_DOMAIN_NAMES="$requested_domains" ./scripts/domain-cert.sh --auto
   refresh_env
   write_runtime_summary
 }

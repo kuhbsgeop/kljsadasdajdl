@@ -23,14 +23,14 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 RECREATE_ON_DOMAIN_UPDATE=1 ENABLE_ACME=1 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_PROTOCOL_GUARD=1 REQUIRE_SECURE_TRANSPORT=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 完整一键安装，没有域名时使用公网 IP + HTTP 入口：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES= SERVER_ALIASES= PANEL_LISTEN_IP=0.0.0.0 ENABLE_ACME=0 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=0 TLS_SERVER_NAME= TLS_CERT_FILE= TLS_KEY_FILE= HTTPS_SITE_ENABLE=0 HTTPS_HTTP_MODE=allow AUTO_ENABLE_TROJAN=0 ENABLE_TROJAN=0 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES= SERVER_ALIASES= PANEL_LISTEN_IP=0.0.0.0 ENABLE_ACME=0 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=0 TLS_SERVER_NAME= TLS_CERT_FILE= TLS_KEY_FILE= HTTPS_SITE_ENABLE=0 HTTPS_HTTP_MODE=allow AUTO_ENABLE_TROJAN=0 ENABLE_TROJAN=0 RECREATE_ON_DOMAIN_UPDATE=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 无域名模式会自动检测公网 IP 并写入 `SERVER_ADDR`。如果服务器检测到的 IP 不对，可以在命令中额外加上 `SERVER_ADDR=你的服务器公网IP`。
@@ -38,15 +38,15 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 上面两条完整命令都可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码和数据库，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后按当前模式刷新 Caddy、刷新 `/sub/`、`/forward/` 和 3X-UI 内置 `all-nodes` 订阅。
 
-如果之前按“无域名公网 IP + HTTP 入口”安装，现在补域名切到 HTTPS，直接运行有域名命令即可。脚本会自动过滤旧的 IP 别名，必要时重建脚本自动管理的 VLESS / Shadowsocks / Trojan / Hysteria 入站，去掉旧的 IP/HTTP 分享节点，重新生成 `https://域名/...` 的面板、订阅和域名节点；手动创建的入站不会按 remark 自动删除。
+如果之前按“无域名公网 IP + HTTP 入口”安装，现在补域名切到 HTTPS，直接运行有域名命令即可。脚本会自动过滤旧的 IP 别名，重建脚本自动管理的域名节点，去掉旧的 IP/HTTP 分享节点，重新生成 `https://域名/...` 的面板、订阅和域名节点；手动创建的入站不会按 remark 自动删除。
 
-如果已经是域名 HTTPS 模式，后续再增加域名，只需要把新域名写进 `DOMAIN_NAMES` 重新运行有域名命令。脚本会把旧域名和新域名合并去重，只新增缺少的域名节点，不会删除之前已经生成的域名节点。
+如果已经是域名 HTTPS 模式，后续再增加域名，只需要把新域名写进 `DOMAIN_NAMES` 重新运行有域名命令。脚本会把旧域名和新域名合并去重，并把所有已激活域名的自动节点重新生成一遍；某个域名 DNS/证书失败时会跳过它继续执行，失败域名会留在 `PENDING_DOMAIN_NAMES`。
 
-通过菜单 `sudo x-ui` -> `10. 管理 Acme 申请域名证书` 补域名也会执行同样的迁移逻辑：可以只输入新增域名，脚本会自动和旧域名合并；旧 IP/HTTP 自动节点会被清理，自动节点的分享地址会切到域名。
+通过菜单 `sudo x-ui` -> `10. 管理 Acme 申请域名证书` 补域名也会执行同样的迁移逻辑：只需要输入新增域名或完整域名列表，后面的 HTTPS、Trojan TLS、协议守护、全量重建都会自动执行；旧 IP/HTTP 自动节点会被清理，自动节点的分享地址会切到域名。
 
 如果补域名后 HTTPS 标红，通常是新域名还没有被当前证书覆盖，常见原因是 DNS 没解析到本机、Cloudflare 开了橙云代理、80/443 没放行，或证书申请时只签到了部分域名。脚本会先检查证书覆盖范围：未覆盖的新域名会暂存为 `PENDING_DOMAIN_NAMES`，不会写入 HTTPS 面板地址和自动节点，避免生成红锁节点；修好 DNS/端口后重新运行菜单 10 或有域名命令即可追加。
 
-默认 `DOMAIN_PORT_MODE=1`：每个域名会使用不同的 VLESS REALITY 端口建立独立节点。启用 HTTPS 站点时，Reality 默认从 `8443` 开始，然后按域名顺序使用 `8443,8444,8445...`。可以用 `DOMAIN_PORT_START=端口` 和 `DOMAIN_PORT_STEP=步长` 自定义起始端口和递增步长。
+默认 `DOMAIN_PORT_MODE=1`：每个域名会使用不同端口建立独立安全节点。启用 HTTPS 站点时，VLESS Reality 默认从 `8443` 开始，Trojan WS TLS 默认从 `9443` 开始，然后按域名顺序递增，例如 VLESS `8443,8444,8445...`，Trojan `9443,9444,9445...`。可以用 `DOMAIN_PORT_START=端口` 和 `DOMAIN_PORT_STEP=步长` 自定义 VLESS 起始端口和递增步长，Trojan 起始端口使用 `TROJAN_PORT`。
 
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
 
@@ -57,13 +57,16 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
       'DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com' \
       DOMAIN_NODE_MODE=1 \
       DOMAIN_PORT_MODE=1 \
+      RECREATE_ON_DOMAIN_UPDATE=1 \
       ENABLE_ACME=1 \
-      STRICT_DOMAIN_CERT=1 \
+      STRICT_DOMAIN_CERT=0 \
       USE_DOMAIN_FOR_LINKS=1 \
       HTTPS_SITE_ENABLE=1 \
       HTTPS_HTTP_MODE=redirect \
       AUTO_ENABLE_TROJAN=1 \
       ENABLE_TROJAN=1 \
+      ENABLE_PROTOCOL_GUARD=1 \
+      REQUIRE_SECURE_TRANSPORT=1 \
       ENABLE_SUBCONVERTER=1 \
       SUBSCRIPTION_EXPAND_ALIASES=1 \
       XUI_BUILTIN_SUB_ENABLE=1 \
@@ -75,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 注意：`DOMAIN_NAMES=...` 必须作为一个完整参数传给 `env`。长域名列表请放在引号里，不要把逗号开头的下一段单独换到新行，否则 Shell 会把下一行当作命令执行。
 
-脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。不开 strict 时，脚本也只会激活已被证书覆盖的域名，未覆盖的域名先放入 `PENDING_DOMAIN_NAMES`，避免 HTTPS 红锁。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1`，安装时传入几个已激活域名，就会为每个域名创建一个不同端口的 VLESS REALITY 入站节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
+脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。默认命令使用 `STRICT_DOMAIN_CERT=0`，会跳过 DNS/证书失败的域名继续执行，未覆盖的域名先放入 `PENDING_DOMAIN_NAMES`，避免 HTTPS 红锁。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1`，安装时传入几个已激活域名，就会为每个域名创建一个不同端口的 VLESS REALITY 入站节点和一个不同端口的 Trojan WS TLS 入站节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
 
 如果某个前缀后续补好了 DNS，运行下面任一命令即可把它追加进证书：
 
@@ -142,7 +145,7 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 - 订阅转换 Web UI：`/sub/`
 - 端口转发 Web UI：`/forward/`，用当前服务器域名和端口访问其他域名/IP 的端口
 - 3X-UI 内置订阅服务的 HTTPS 反代 URI，避免面板导出 `http://:2096` 链接
-- 安全协议守护：默认禁用 `vmess/http/mixed/mtproto/tun` 入站，保留 `vless/trojan/shadowsocks/wireguard/hysteria/tunnel`
+- 安全协议守护：默认禁用 `vmess/http/mixed/mtproto/tun` 入站，保留 `vless/trojan/shadowsocks/wireguard/hysteria/tunnel`；域名 HTTPS 模式默认启用 `REQUIRE_SECURE_TRANSPORT=1`，会继续禁用没有 `tls` 或 `reality` 传输安全的旧入站
 - `dokodemo-door` 转发预设；在 3X-UI 官方面板中协议名显示为 `tunnel`
 - `3.5.yaml` 规则配置 Web 编辑器，使用安装时生成的编辑 token
 - Web 一键刷新全部 3X-UI 入站链接，并用本地 `3.5.yaml` 渲染 Clash 订阅
@@ -360,7 +363,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 sudo ./scripts/manage.sh protocol-guard
 ```
 
-默认允许列表是 `vless,trojan,shadowsocks,wireguard,hysteria,tunnel`。默认动作是禁用，不删除；如果要删除不安全入站：
+默认允许列表是 `vless,trojan,shadowsocks,wireguard,hysteria,tunnel`。默认动作是禁用，不删除。域名 HTTPS 模式会设置 `REQUIRE_SECURE_TRANSPORT=1`，只保留带 `tls` 或 `reality` 传输安全的入站；如果要删除不安全入站：
 
 ```bash
 sudo PROTOCOL_GUARD_ACTION=delete ./scripts/protocol-guard.sh

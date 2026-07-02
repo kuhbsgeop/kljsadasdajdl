@@ -372,6 +372,10 @@ issue_cert() {
   TLS_CERT_FILE="/root/cert/domains/fullchain.pem"
   TLS_KEY_FILE="/root/cert/domains/privkey.pem"
   TLS_SERVER_NAME="$primary"
+  if ! cert_covers_domains "$domains"; then
+    log "Installed certificate does not cover every requested domain: ${domains}"
+    return 1
+  fi
 }
 
 cert_covers_domains() {
@@ -464,7 +468,10 @@ configure_firewall_ports() {
     ports+=("${SITE_HTTPS_PORT:-443}/tcp")
   fi
   if [ "${ENABLE_TROJAN:-0}" = "1" ] || [ "${AUTO_ENABLE_TROJAN:-1}" = "1" ]; then
-    ports+=("${TROJAN_PORT:-9443}/tcp")
+    local trojan_port
+    while IFS= read -r trojan_port; do
+      [ -n "$trojan_port" ] && ports+=("${trojan_port}/tcp")
+    done < <(domain_trojan_ports)
   fi
   if [ "${ENABLE_SHADOWSOCKS:-1}" = "1" ]; then
     ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
@@ -518,6 +525,24 @@ domain_reality_ports() {
   base="${DOMAIN_PORT_START:-${REALITY_PORT:-443}}"
   step="${DOMAIN_PORT_STEP:-1}"
   [[ "$base" =~ ^[0-9]+$ ]] || base="${REALITY_PORT:-443}"
+  [[ "$step" =~ ^[0-9]+$ ]] || step=1
+  [ "$step" -ge 1 ] || step=1
+  for ((i = 0; i < count; i++)); do
+    printf '%d\n' $((base + i * step))
+  done
+}
+
+domain_trojan_ports() {
+  local count base step i
+  if ! truthy "${DOMAIN_PORT_MODE:-1}"; then
+    printf '%s\n' "${TROJAN_PORT:-9443}"
+    return
+  fi
+  count="$(domain_node_values_for_ports | awk 'NF { count++ } END { print count + 0 }')"
+  [ "$count" -gt 0 ] || count=1
+  base="${TROJAN_PORT:-9443}"
+  step="${DOMAIN_PORT_STEP:-1}"
+  [[ "$base" =~ ^[0-9]+$ ]] || base="${TROJAN_PORT:-9443}"
   [[ "$step" =~ ^[0-9]+$ ]] || step=1
   [ "$step" -ge 1 ] || step=1
   for ((i = 0; i < count; i++)); do
@@ -627,6 +652,11 @@ main() {
   set_env_var DOMAIN_PORT_STEP "${DOMAIN_PORT_STEP:-1}"
   DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
   DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
+  if truthy "${RECREATE_ON_DOMAIN_UPDATE:-1}"; then
+    RECREATE_MANAGED_INBOUNDS=1
+    export RECREATE_MANAGED_INBOUNDS
+    log "Domain update will rebuild all managed domain inbounds."
+  fi
   if [ "${RECREATE_MANAGED_INBOUNDS+x}" != "x" ]; then
     if [ -z "$old_domain_values" ] || [ "$old_https" != "1" ] || [ "$old_use_domain" != "1" ] || contains_ipv4_value "$old_aliases" || contains_ipv4_value "$old_server_addr"; then
       RECREATE_MANAGED_INBOUNDS=1
@@ -652,7 +682,32 @@ main() {
       use_existing_cert "$cert_primary"
     else
       if ! issue_cert "$cert_domains" "$cert_primary"; then
-        if ! adopt_existing_primary_cert "$cert_primary" "$cert_domains"; then
+        local best_domains="" candidate_domains candidate_primary d domain_parts=()
+        log "Full certificate request did not cover all DNS-ready domains; retrying best-effort by domain."
+        best_domains="$(cert_covered_domains_from_list "$cert_domains")"
+        IFS=',' read -r -a domain_parts <<< "$cert_domains"
+        for d in "${domain_parts[@]}"; do
+          [ -n "$d" ] || continue
+          domain_in_list "$d" "$best_domains" && continue
+          candidate_domains="$(domain_values_without_ips "$best_domains" "$d")"
+          candidate_primary="$(first_domain "$candidate_domains")"
+          if cert_covers_domains "$candidate_domains" || issue_cert "$candidate_domains" "$candidate_primary"; then
+            if cert_covers_domains "$candidate_domains"; then
+              best_domains="$candidate_domains"
+              cert_primary="$candidate_primary"
+              log "Certificate now covers: ${best_domains}"
+            else
+              log "Skipping ${d}: certificate was issued/installed but SAN coverage did not include it."
+            fi
+          else
+            log "Skipping ${d}: certificate request failed; continuing with other domains."
+          fi
+        done
+        if [ -n "$best_domains" ]; then
+          cert_domains="$best_domains"
+          cert_primary="$(first_domain "$cert_domains")"
+          use_existing_cert "$cert_primary"
+        elif ! adopt_existing_primary_cert "$cert_primary" "$cert_domains"; then
           truthy "$STRICT_DOMAIN_CERT" && return 1
         fi
       fi
@@ -721,6 +776,13 @@ main() {
   if [ "${APPLY_AFTER_DOMAIN:-1}" = "1" ] && docker inspect "$XUI_CONTAINER" >/dev/null 2>&1; then
     ENABLE_TROJAN="${ENABLE_TROJAN:-0}" RECREATE_MANAGED_INBOUNDS="${RECREATE_MANAGED_INBOUNDS:-0}" ./scripts/apply-presets.sh || true
   fi
+  if [ "${ENABLE_PROTOCOL_GUARD:-1}" = "1" ] && [ -x ./scripts/protocol-guard.sh ] && docker inspect "$XUI_CONTAINER" >/dev/null 2>&1; then
+    PROTOCOL_GUARD_ACTION="${PROTOCOL_GUARD_ACTION:-disable}" ./scripts/protocol-guard.sh || true
+  fi
+  if [ "${RECREATE_MANAGED_INBOUNDS:-0}" = "1" ]; then
+    set_env_var RECREATE_MANAGED_INBOUNDS "0"
+    RECREATE_MANAGED_INBOUNDS=0
+  fi
 
   start_mask_site
 
@@ -737,6 +799,9 @@ main() {
   echo "  主域名: ${primary}"
   echo "  Web入口: $(web_origin "$primary")/"
   echo "  VLESS Reality端口: $(domain_reality_ports | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep=", " }')"
+  if [ "${ENABLE_TROJAN:-0}" = "1" ] || [ "${AUTO_ENABLE_TROJAN:-1}" = "1" ]; then
+    echo "  Trojan WS TLS端口: $(domain_trojan_ports | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep=", " }')"
+  fi
   echo "  订阅转换: $(web_origin "$primary")/sub/"
   if [ -n "${XUI_BUILTIN_SUB_PATH:-}" ]; then
     echo "  3X-UI内置订阅: $(web_origin "$primary")${XUI_BUILTIN_SUB_PATH}"

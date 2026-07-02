@@ -16,6 +16,14 @@ PANEL_PORT="${PANEL_PORT:-2053}"
 WEB_BASE_PATH="${WEB_BASE_PATH:-panel}"
 PROTOCOL_GUARD_ACTION="${PROTOCOL_GUARD_ACTION:-disable}"
 SAFE_PROTOCOLS="${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}"
+REQUIRE_SECURE_TRANSPORT="${REQUIRE_SECURE_TRANSPORT:-0}"
+
+truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|y|Y|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 api_token() {
   if [ -n "${XUI_API_TOKEN:-}" ]; then
@@ -38,34 +46,61 @@ is_safe_protocol() {
   printf ',%s,' "$SAFE_PROTOCOLS" | grep -q ",${protocol},"
 }
 
+has_secure_transport() {
+  local protocol="$1"
+  local security="$2"
+  case "$protocol" in
+    tunnel|dokodemo-door)
+      return 0
+      ;;
+  esac
+  case "$security" in
+    tls|reality)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 main() {
-  local token base list rows changed id protocol remark enable
+  local token base list rows changed id protocol remark enable security reason
   token="$(api_token)"
   base="$(api_base)"
   list="$(curl -fsS --connect-timeout 3 --max-time 30 -H "Authorization: Bearer ${token}" "${base%/}/panel/api/inbounds/list")"
-  rows="$(printf '%s' "$list" | jq -r '.obj[]? | [.id, .protocol, .remark, .enable] | @tsv')"
+  rows="$(printf '%s' "$list" | jq -r '
+    def obj:
+      if type == "string" then (fromjson? // {}) else (. // {}) end;
+    .obj[]? | [.id, .protocol, .remark, .enable, ((.streamSettings | obj).security // "none")] | @tsv
+  ')"
   changed=0
 
-  while IFS=$'\t' read -r id protocol remark enable; do
+  while IFS=$'\t' read -r id protocol remark enable security; do
     [ -n "$id" ] || continue
-    if is_safe_protocol "$protocol"; then
+    reason=""
+    if ! is_safe_protocol "$protocol"; then
+      reason="unsafe protocol"
+    elif truthy "$REQUIRE_SECURE_TRANSPORT" && ! has_secure_transport "$protocol" "$security"; then
+      reason="missing tls/reality transport security"
+    else
       continue
     fi
     case "$PROTOCOL_GUARD_ACTION" in
       delete)
-        echo "Deleting unsafe inbound: ${remark} (${protocol}, id=${id})"
+        echo "Deleting unsafe inbound: ${remark} (${protocol}, security=${security}, id=${id}, reason=${reason})"
         curl -fsS --connect-timeout 3 --max-time 30 -X POST -H "Authorization: Bearer ${token}" \
           "${base%/}/panel/api/inbounds/del/${id}" | jq . || true
         changed=1
         ;;
       disable|*)
         if [ "$enable" = "true" ]; then
-          echo "Disabling unsafe inbound: ${remark} (${protocol}, id=${id})"
+          echo "Disabling unsafe inbound: ${remark} (${protocol}, security=${security}, id=${id}, reason=${reason})"
           curl -fsS --connect-timeout 3 --max-time 30 -X POST -H "Authorization: Bearer ${token}" \
             -F enable=false "${base%/}/panel/api/inbounds/setEnable/${id}" | jq . || true
           changed=1
         else
-          echo "Already disabled unsafe inbound: ${remark} (${protocol}, id=${id})"
+          echo "Already disabled unsafe inbound: ${remark} (${protocol}, security=${security}, id=${id}, reason=${reason})"
         fi
         ;;
     esac
@@ -77,6 +112,7 @@ main() {
   fi
 
   echo "Safe protocol allowlist: ${SAFE_PROTOCOLS}"
+  echo "Require tls/reality transport security: ${REQUIRE_SECURE_TRANSPORT}"
   echo "Action: ${PROTOCOL_GUARD_ACTION}"
 }
 
