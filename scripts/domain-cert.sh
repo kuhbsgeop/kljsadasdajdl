@@ -68,16 +68,21 @@ set_env_var() {
   chmod 600 .env
 }
 
+expand_domain_separators() {
+  printf '%s\n' "$@" \
+    | sed -E 's/\.((com|net|org|icu|shop|xyz|top|site|online|io|co|me|app|dev|info|biz|cc|vip|club|store|cloud|live|pro|link|one|fun|work|world|today|life|tech|space|website|email|art|ai|us|uk|cn|hk|tw|jp|kr|de|fr|ca|au|in))\.((www|api|cdn|mail|m|h5|pay|panel|sub)\.)/.\1,\3/g'
+}
+
 normalize_domains() {
-  printf '%s' "$1" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="," }'
+  expand_domain_separators "$1" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="," }'
 }
 
 contains_ipv4_value() {
-  printf '%s' "$1" | tr ',，;； ' '\n' | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+  expand_domain_separators "$1" | tr ',，;； ' '\n' | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
 }
 
 domain_values_without_ips() {
-  printf '%s\n' "$@" \
+  expand_domain_separators "$@" \
     | tr ',，;； ' '\n' \
     | awk '
       NF && $0 !~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/ && $0 !~ /^[0-9A-Fa-f:]+$/ && !seen[$0]++ {
@@ -88,7 +93,7 @@ domain_values_without_ips() {
 }
 
 first_domain() {
-  printf '%s' "$1" | awk -F',' '{print $1}'
+  normalize_domains "$1" | awk -F',' '{print $1}'
 }
 
 domain_in_list() {

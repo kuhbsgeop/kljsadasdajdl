@@ -93,16 +93,21 @@ install_override_value() {
   printf '%s' "${!override_name}"
 }
 
+expand_domain_separators() {
+  printf '%s\n' "$@" \
+    | sed -E 's/\.((com|net|org|icu|shop|xyz|top|site|online|io|co|me|app|dev|info|biz|cc|vip|club|store|cloud|live|pro|link|one|fun|work|world|today|life|tech|space|website|email|art|ai|us|uk|cn|hk|tw|jp|kr|de|fr|ca|au|in))\.((www|api|cdn|mail|m|h5|pay|panel|sub)\.)/.\1,\3/g'
+}
+
 first_domain() {
-  printf '%s' "$1" | awk -F'[,，;；[:space:]]+' '{print $1}'
+  expand_domain_separators "$1" | tr ',，;； ' '\n' | awk 'NF { print; exit }'
 }
 
 contains_ipv4_value() {
-  printf '%s' "$1" | tr ',，;； ' '\n' | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+  expand_domain_separators "$1" | tr ',，;； ' '\n' | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
 }
 
 domain_values_without_ips() {
-  printf '%s\n' "$@" \
+  expand_domain_separators "$@" \
     | tr ',，;； ' '\n' \
     | awk '
       NF && $0 !~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/ && $0 !~ /^[0-9A-Fa-f:]+$/ && !seen[$0]++ {

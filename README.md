@@ -80,6 +80,8 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 注意：`DOMAIN_NAMES=...` 必须作为一个完整参数传给 `env`。长域名列表请放在引号里，不要把逗号开头的下一段单独换到新行，否则 Shell 会把下一行当作命令执行。
 
+如果不小心少写了逗号，例如把 `a.example.com,www.example.com` 写成 `a.example.com.www.example.com`，脚本会尽量自动拆成两个域名，避免后面的 `www`、`api`、`sub` 等前缀被当作一个不存在的长域名跳过。但仍建议手动用逗号分隔每个域名，避免 DNS 和证书结果不符合预期。
+
 脚本会把这些域名写入 Caddy HTTPS 站点和 `SERVER_ALIASES`。申请证书前会先检查 DNS；开启 `STRICT_DOMAIN_CERT=1` 时，所有域名必须都签进同一张证书，否则安装直接失败，避免只配置好一部分域名。默认命令使用 `STRICT_DOMAIN_CERT=0`，会跳过 DNS/证书失败的域名继续执行，未覆盖的域名先放入 `PENDING_DOMAIN_NAMES`，避免 HTTPS 红锁。默认 `ACME_SERVER=letsencrypt`、`ACME_FALLBACK_SERVER=zerossl`，遇到 Let’s Encrypt 临时 `serverInternal/overloaded` 会尝试备用 CA；如果所有 CA 都失败，会保留 pending，稍后重新运行菜单 10。默认 `DOMAIN_NODE_MODE=1` 且 `DOMAIN_PORT_MODE=1`，安装时传入几个已激活域名，就会为每个域名创建一个不同端口的 VLESS REALITY 入站节点和一个不同端口的 Trojan WS TLS 入站节点，并把这些域名节点同步到 3X-UI 内置 all-nodes 订阅。
 
 如果某个前缀后续补好了 DNS，运行下面任一命令即可把它追加进证书：
