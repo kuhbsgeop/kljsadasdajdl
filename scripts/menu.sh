@@ -149,8 +149,20 @@ autostart_status() {
 panel_url() {
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     printf '%s/%s/' "$(web_origin)" "${WEB_BASE_PATH#/}"
-  else
+  elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
     printf 'http://%s:%s/%s/' "$SERVER_ADDR" "$PANEL_PORT" "${WEB_BASE_PATH#/}"
+  else
+    tunnel_url
+  fi
+}
+
+panel_access_note() {
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    printf 'Domain HTTPS mode is enabled; open the panel directly with the domain URL.'
+  elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+    printf 'Public IP HTTP mode is enabled; open the panel directly with the IP URL.'
+  else
+    printf 'Panel is bound to localhost. Change PANEL_LISTEN_IP to 0.0.0.0 or enable domain HTTPS mode for direct public access.'
   fi
 }
 
@@ -231,14 +243,10 @@ write_runtime_summary() {
   Password:   ${PANEL_PASSWORD:-unknown}
 
 3) How to open the panel
-  Panel public display URL:
+  Panel access URL:
     $(panel_url)
-
-  Recommended SSH tunnel when Panel bind is 127.0.0.1:
-    $(tunnel_cmd)
-
-  Tunnel browser URL:
-    $(tunnel_url)
+  Access mode:
+    $(panel_access_note)
 
 4) Client config links
   ${ROOT_DIR}/runtime/client-links.txt
@@ -325,11 +333,8 @@ show_status() {
   echo "开机自启动: $(autostart_status)"
   echo "面板监听: ${cyan}${PANEL_LISTEN_IP}:${PANEL_PORT}${plain}"
   echo "面板路径: ${cyan}/${WEB_BASE_PATH}/ ${plain}"
-  echo "面板公网地址: ${blue}$(panel_url)${plain}"
-  if [ "$PANEL_LISTEN_IP" = "127.0.0.1" ] || [ "$PANEL_LISTEN_IP" = "localhost" ]; then
-    echo "SSH隧道: ${yellow}$(tunnel_cmd)${plain}"
-    echo "隧道访问地址: ${blue}$(tunnel_url)${plain}"
-  fi
+  echo "面板访问地址: ${blue}$(panel_url)${plain}"
+  echo "访问模式: ${cyan}$(panel_access_note)${plain}"
   line
   echo "x-ui登录信息如下:"
   echo "登录用户名: ${blue}${PANEL_USERNAME:-unknown}${plain}"
@@ -641,8 +646,8 @@ show_help() {
   ./scripts/manage.sh protocol-guard
 
 安全建议:
-  1. 面板默认绑定 127.0.0.1，通过 SSH 隧道访问。
-  2. 公网只开放 ${REALITY_PORT}/tcp 给 VLESS REALITY。
+  1. 默认交互式安全模式会把面板绑定 127.0.0.1；公网 IP 直连请把监听 IP 改成 0.0.0.0。
+  2. 有域名时优先使用 HTTPS 域名入口；无域名公网 HTTP 模式会开放面板随机端口。
   3. 不要把 .env、install-summary.txt、订阅链接发给别人。
   4. Trojan/Hysteria2 建议使用真实可信 TLS 证书。
   5. 输入域名申请证书前，请先把域名 A 记录解析到当前 VPS 公网 IP。

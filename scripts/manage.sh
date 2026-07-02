@@ -291,13 +291,16 @@ case "$cmd" in
       echo "Visual panel:"
       echo "  Bind:      ${PANEL_LISTEN_IP:-127.0.0.1}:${PANEL_PORT:-2053}"
       echo "  Path:      /${WEB_BASE_PATH:-panel}/"
-      echo "  Public:    http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+      if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+        echo "  Direct:    https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
+      elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+        echo "  Direct:    http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+      else
+        echo "  Local:     http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+        echo "  Note:      Panel is bound to localhost; set PANEL_LISTEN_IP=0.0.0.0 or enable domain HTTPS mode for direct public access."
+      fi
       echo "  Username:  ${PANEL_USERNAME:-unknown}"
       echo "  Password:  ${PANEL_PASSWORD:-unknown}"
-      echo
-      echo "Open through SSH tunnel:"
-      echo "  ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
-      echo "  http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
     fi
     ;;
   logs)

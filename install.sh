@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main}"
+REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 
 INSTALL_ENV_OVERRIDE_KEYS=(
+  PANEL_PORT PANEL_LISTEN_IP WEB_BASE_PATH
   DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE
   ENABLE_ACME ACME_EMAIL STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
   ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA
@@ -461,7 +462,7 @@ run_config_wizard() {
 
   tty_print ""
   tty_print "Panel exposure:"
-  tty_print "  1) Safe: bind panel to 127.0.0.1 and open through SSH tunnel"
+  tty_print "  1) Safe: bind panel to 127.0.0.1 for local-only access"
   tty_print "  2) Public: bind panel to 0.0.0.0"
   bind_choice="$(tty_prompt "Choose panel exposure" "1")"
   if [ "$bind_choice" = "2" ]; then
@@ -827,11 +828,22 @@ write_install_summary() {
   load_env
   local summary="${INSTALL_DIR}/runtime/install-summary.txt"
   local public_panel_url="http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
-  local tunnel_cmd="ssh -L ${PANEL_PORT:-2053}:127.0.0.1:${PANEL_PORT:-2053} root@${SERVER_ADDR:-your-server}"
-  local tunnel_panel_url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+  local local_panel_url="http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
+  local access_label="Direct panel URL"
+  local access_url="$public_panel_url"
+  local access_note="Panel is reachable directly from the public address above."
   local panel_urls="${INSTALL_DIR}/runtime/panel-public-urls.txt"
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     public_panel_url="https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
+    access_url="$public_panel_url"
+    access_note="Domain HTTPS mode is enabled; open the panel directly with the domain URL."
+  elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+    access_url="$public_panel_url"
+    access_note="Public IP HTTP mode is enabled; open the panel directly with the IP URL."
+  else
+    access_label="Local-only panel URL"
+    access_url="$local_panel_url"
+    access_note="Panel is bound to localhost. Change PANEL_LISTEN_IP to 0.0.0.0 or enable domain HTTPS mode for direct public access."
   fi
   mkdir -p "${INSTALL_DIR}/runtime"
   chmod 700 "${INSTALL_DIR}/runtime"
@@ -857,16 +869,12 @@ write_install_summary() {
   Password:   ${PANEL_PASSWORD:-unknown}
 
 3) How to open the panel
-  Panel public display URL:
-    ${public_panel_url}
+  ${access_label}:
+    ${access_url}
+  Access mode:
+    ${access_note}
   All configured domain panel URLs:
     ${panel_urls}
-
-  Recommended SSH tunnel when Panel bind is 127.0.0.1:
-    ${tunnel_cmd}
-
-  Tunnel browser URL:
-    ${tunnel_panel_url}
 
 4) Client config links
   Script-generated main links:

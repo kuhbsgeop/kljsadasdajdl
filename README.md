@@ -15,32 +15,33 @@
 默认交互式安装：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
   | sudo env CONFIG_WIZARD=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 完整一键安装，有域名并启用 HTTPS、订阅、端口转发 Web 页面：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
   | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,newctshpm.icu,safkdsajfkajfasfdyidsf.newctshpm.icu,www.newctshpm.icu' DOMAIN_NODE_MODE=1 ENABLE_ACME=1 STRICT_DOMAIN_CERT=1 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 完整一键安装，没有域名时使用公网 IP + HTTP 入口：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES= SERVER_ALIASES= ENABLE_ACME=0 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=0 TLS_SERVER_NAME= TLS_CERT_FILE= TLS_KEY_FILE= HTTPS_SITE_ENABLE=0 HTTPS_HTTP_MODE=allow AUTO_ENABLE_TROJAN=0 ENABLE_TROJAN=0 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 DOMAIN_NODE_MODE=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
+  | sudo env CONFIG_WIZARD=0 DOMAIN_NAMES= SERVER_ALIASES= PANEL_LISTEN_IP=0.0.0.0 ENABLE_ACME=0 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=0 TLS_SERVER_NAME= TLS_CERT_FILE= TLS_KEY_FILE= HTTPS_SITE_ENABLE=0 HTTPS_HTTP_MODE=allow AUTO_ENABLE_TROJAN=0 ENABLE_TROJAN=0 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 DOMAIN_NODE_MODE=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 无域名模式会自动检测公网 IP 并写入 `SERVER_ADDR`。如果服务器检测到的 IP 不对，可以在命令中额外加上 `SERVER_ADDR=你的服务器公网IP`。
+上面的公网 HTTP 命令会把面板监听改成 `0.0.0.0`，并自动放行安装摘要里显示的随机面板端口。安装完成后直接打开 `http://公网IP:面板端口/随机路径/`。
 
 上面两条完整命令都可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码和数据库，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后按当前模式刷新 Caddy、刷新 `/sub/`、`/forward/` 和 3X-UI 内置 `all-nodes` 订阅。
 
 多个域名、多个前缀都写进 `DOMAIN_NAMES`，例如：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
   | sudo env \
       CONFIG_WIZARD=0 \
       'DOMAIN_NAMES=example.com,www.example.com,a.example.com,b.example.com' \
@@ -90,7 +91,7 @@ heubhkldhuu.shop,www.heubhkldhuu.shop
 
 - 面板公网显示地址、监听 IP、端口和随机路径
 - 面板用户名和密码
-- SSH 隧道命令
+- 面板直接访问地址
 - VLESS REALITY、Shadowsocks、Trojan 等节点链接文件
 - 域名、证书、HTTPS/HTTP 模式
 - 订阅转换 Web UI 地址
@@ -148,23 +149,20 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 
 ## 面板访问
 
-默认更安全：面板绑定 `127.0.0.1:随机端口`，公网扫不到。安装摘要会显示公网 IP/域名、端口和路径；如果没有启用 HTTPS 域名站点，建议先建 SSH 隧道：
-
-```bash
-ssh -L 面板端口:127.0.0.1:面板端口 root@your.server.ip
-```
-
-然后浏览器打开：
+有域名完整安装会启用 HTTPS 站点，面板直接通过第一个域名和随机路径打开：
 
 ```text
-http://127.0.0.1:面板端口/随机路径/
+https://your.domain/随机路径/
 ```
 
-如果你在安装向导选择公网面板，脚本会把监听改成 `0.0.0.0` 并在菜单里直接显示：
+无域名公网 IP + HTTP 入口命令会把面板监听改成 `0.0.0.0`，面板直接通过公网 IP、随机端口和随机路径打开：
 
 ```text
 http://your.server.ip:面板端口/随机路径/
 ```
+
+默认交互式安装如果选择安全本机模式，面板会绑定 `127.0.0.1`，公网不能直接打开。要改成公网 IP 直连，可以在菜单里修改监听 IP 为 `0.0.0.0`，或重新运行无域名公网 HTTP 命令覆盖安装。
+
 
 ## 域名与 HTTPS
 
@@ -331,14 +329,14 @@ sudo ENABLE_DOKODEMO=1 \
 一键安装/覆盖安装时也可以直接带上转发参数，已有 `.env` 时这些 `DOKODEMO_*` 参数会被写回：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
   | sudo env CONFIG_WIZARD=0 ENABLE_DOKODEMO=1 DOKODEMO_LISTEN=0.0.0.0 DOKODEMO_PORT=27677 DOKODEMO_TARGET_ADDRESS=127.0.0.1 DOKODEMO_TARGET_PORT=9999 DOKODEMO_NETWORK=tcp MENU_AFTER_INSTALL=1 bash
 ```
 
 如果要一键生成多个转发节点，使用 `DOKODEMO_FORWARDS`，每个节点格式是 `外部端口,目标域名或IP,目标端口,协议,监听IP`，多个节点用英文分号分隔：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
   | sudo env CONFIG_WIZARD=0 \
       'DOKODEMO_FORWARDS=27677,api.example.com,9999,tcp,0.0.0.0;27678,pay.example.net,443,tcp,0.0.0.0' \
       MENU_AFTER_INSTALL=1 \
@@ -385,7 +383,7 @@ sudo docker compose up -d --force-recreate subconfig-api
 如果当前服务器还是很旧的脚本，出现 `set_env_var: command not found`，先用下面命令补一次仓库脚本；它会保留已有 `.env`、面板账号、密码和数据库：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
   | sudo env CONFIG_WIZARD=0 MENU_AFTER_INSTALL=0 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 

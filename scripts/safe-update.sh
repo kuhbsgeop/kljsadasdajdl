@@ -23,7 +23,7 @@ cat > "$run_file" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
-REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/musicbin/3xui-selfhost-kit/main}"
+REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main}"
 [ -f .env ] && {
   set -a
   . ./.env
