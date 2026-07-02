@@ -338,10 +338,11 @@ install_acme() {
 issue_cert() {
   local domains="$1"
   local primary="$2"
-  local acme domain_args=() domain_parts=() d server servers issue_ok acme_fullchain
+  local acme domain_args=() domain_parts=() d server servers issue_ok acme_fullchain email
 
   install_acme
   acme="$(acme_bin)"
+  email="${ACME_EMAIL:-admin@${primary}}"
 
   IFS=',' read -r -a domain_parts <<< "$domains"
   for d in "${domain_parts[@]}"; do
@@ -358,6 +359,7 @@ issue_cert() {
   while IFS= read -r server; do
     [ -n "$server" ] || continue
     "$acme" --set-default-ca --server "$server" >/dev/null 2>&1 || true
+    "$acme" --register-account --server "$server" -m "$email" >/dev/null 2>&1 || true
     log "Issuing certificate for: ${domains} (CA: ${server})"
     issue_ok=1
     if ! "$acme" --issue --server "$server" --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256; then
@@ -694,6 +696,7 @@ main() {
     email="$(prompt "ACME 续期通知邮箱" "$email")"
   fi
   set_env_var ACME_EMAIL "$email"
+  ACME_EMAIL="$email"
 
   write_mask_page "$primary"
 
