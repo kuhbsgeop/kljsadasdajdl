@@ -524,7 +524,9 @@ domain_cert_menu() {
   set_env_var REQUIRE_SECURE_TRANSPORT "1"
 
   refresh_env
-  RECREATE_MANAGED_INBOUNDS=1 REQUIRE_SECURE_TRANSPORT=1 REQUESTED_DOMAIN_NAMES="$requested_domains" ./scripts/domain-cert.sh --auto
+  if ! RECREATE_MANAGED_INBOUNDS=1 REQUIRE_SECURE_TRANSPORT=1 REQUESTED_DOMAIN_NAMES="$requested_domains" ./scripts/domain-cert.sh --auto; then
+    echo "${yellow}域名证书本次没有全部完成；失败域名会保留为待补证书域名，修好 DNS/续费/CA 临时故障后再选 10 重试。${plain}"
+  fi
   refresh_env
   write_runtime_summary
 }

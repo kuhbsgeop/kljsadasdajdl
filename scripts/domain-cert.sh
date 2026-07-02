@@ -24,6 +24,8 @@ DOMAIN_NODE_MODE="${DOMAIN_NODE_MODE:-1}"
 DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
 DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
 DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
+ACME_SERVER="${ACME_SERVER:-letsencrypt}"
+ACME_FALLBACK_SERVER="${ACME_FALLBACK_SERVER:-zerossl}"
 REQUESTED_DOMAIN_NAMES="${REQUESTED_DOMAIN_NAMES:-}"
 
 green=$'\033[0;32m'
@@ -336,12 +338,10 @@ install_acme() {
 issue_cert() {
   local domains="$1"
   local primary="$2"
-  local acme domain_args=() domain_parts=() d
+  local acme domain_args=() domain_parts=() d server servers issue_ok acme_fullchain
 
   install_acme
   acme="$(acme_bin)"
-
-  "$acme" --set-default-ca --server letsencrypt >/dev/null
 
   IFS=',' read -r -a domain_parts <<< "$domains"
   for d in "${domain_parts[@]}"; do
@@ -349,33 +349,58 @@ issue_cert() {
   done
 
   mkdir -p data/cert/domains
-  log "Issuing certificate for: ${domains}"
-  if ! "$acme" --issue --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256; then
-    log "Certificate issue/renewal was skipped or failed; trying to install the existing certificate."
-  fi
-  if ! "$acme" --install-cert -d "$primary" --ecc \
-    --fullchain-file "$ROOT_DIR/data/cert/domains/fullchain.pem" \
-    --key-file "$ROOT_DIR/data/cert/domains/privkey.pem" \
-    --reloadcmd "cd $ROOT_DIR && docker restart $XUI_CONTAINER >/dev/null 2>&1 || true"; then
-    log "Could not install certificate for ${primary}."
-    return 1
-  fi
+  servers="$(
+    printf '%s\n' "${ACME_SERVER:-letsencrypt}" "${ACME_FALLBACK_SERVER:-}" \
+      | tr ',，;； ' '\n' \
+      | awk 'NF && !seen[$0]++'
+  )"
 
-  [ -s "$ROOT_DIR/data/cert/domains/fullchain.pem" ] || { log "Installed certificate file is missing."; return 1; }
-  [ -s "$ROOT_DIR/data/cert/domains/privkey.pem" ] || { log "Installed private key file is missing."; return 1; }
+  while IFS= read -r server; do
+    [ -n "$server" ] || continue
+    "$acme" --set-default-ca --server "$server" >/dev/null 2>&1 || true
+    log "Issuing certificate for: ${domains} (CA: ${server})"
+    issue_ok=1
+    if ! "$acme" --issue --server "$server" --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256; then
+      log "Certificate issue/renewal failed on ${server}; trying to install an existing certificate or another CA."
+    else
+      issue_ok=0
+    fi
+    acme_fullchain="$HOME/.acme.sh/${primary}_ecc/fullchain.cer"
+    if [ "$issue_ok" != "0" ] && [ ! -s "$acme_fullchain" ]; then
+      log "No existing acme.sh certificate file for ${primary}; skipping install-cert for ${server}."
+      continue
+    fi
+    if ! "$acme" --install-cert -d "$primary" --ecc \
+      --fullchain-file "$ROOT_DIR/data/cert/domains/fullchain.pem" \
+      --key-file "$ROOT_DIR/data/cert/domains/privkey.pem" \
+      --reloadcmd "cd $ROOT_DIR && docker restart $XUI_CONTAINER >/dev/null 2>&1 || true"; then
+      log "Could not install certificate for ${primary} from ${server}."
+      continue
+    fi
 
-  set_env_var TLS_CERT_FILE "/root/cert/domains/fullchain.pem"
-  set_env_var TLS_KEY_FILE "/root/cert/domains/privkey.pem"
-  set_env_var TLS_SERVER_NAME "$primary"
-  set_env_var ENABLE_ACME "1"
+    [ -s "$ROOT_DIR/data/cert/domains/fullchain.pem" ] || { log "Installed certificate file is missing."; continue; }
+    [ -s "$ROOT_DIR/data/cert/domains/privkey.pem" ] || { log "Installed private key file is missing."; continue; }
 
-  TLS_CERT_FILE="/root/cert/domains/fullchain.pem"
-  TLS_KEY_FILE="/root/cert/domains/privkey.pem"
-  TLS_SERVER_NAME="$primary"
-  if ! cert_covers_domains "$domains"; then
-    log "Installed certificate does not cover every requested domain: ${domains}"
-    return 1
-  fi
+    if ! cert_covers_domains "$domains"; then
+      log "Installed certificate from ${server} does not cover every requested domain: ${domains}"
+      continue
+    fi
+
+    set_env_var TLS_CERT_FILE "/root/cert/domains/fullchain.pem"
+    set_env_var TLS_KEY_FILE "/root/cert/domains/privkey.pem"
+    set_env_var TLS_SERVER_NAME "$primary"
+    set_env_var ENABLE_ACME "1"
+    set_env_var ACME_SERVER "$server"
+
+    TLS_CERT_FILE="/root/cert/domains/fullchain.pem"
+    TLS_KEY_FILE="/root/cert/domains/privkey.pem"
+    TLS_SERVER_NAME="$primary"
+    ACME_SERVER="$server"
+    return 0
+  done <<< "$servers"
+
+  log "No ACME CA produced a certificate covering: ${domains}"
+  return 1
 }
 
 cert_covers_domains() {
@@ -742,6 +767,12 @@ main() {
       else
         log "No installed certificate covers the requested domains. HTTPS would be red, so no domain/node changes were activated."
         log "Fix DNS/proxy records and rerun x-ui option 10 or the domain one-click command."
+        set_env_var PENDING_DOMAIN_NAMES "$domains"
+        PENDING_DOMAIN_NAMES="$domains"
+        set_env_var HTTPS_SITE_ENABLE "$old_https"
+        HTTPS_SITE_ENABLE="$old_https"
+        set_env_var USE_DOMAIN_FOR_LINKS "$old_use_domain"
+        USE_DOMAIN_FOR_LINKS="$old_use_domain"
         return 1
       fi
     fi
