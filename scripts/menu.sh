@@ -319,6 +319,7 @@ show_header() {
   echo "${green}17. 检查域名 A/AAAA、IPv4/IPv6、端口监听${plain}"
   echo "${green}18. 刷新全部入站订阅链接【使用 3.5.yaml 规则】${plain}"
   echo "${green}19. 打开端口转发 Web 页面【自动填Token】${plain}"
+  echo "${green}20. 批量放开防火墙端口【ufw/firewalld/iptables】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -659,6 +660,7 @@ show_help() {
   ./scripts/manage.sh domain
   ./scripts/manage.sh subscription
   ./scripts/manage.sh xui-subscription
+  ./scripts/manage.sh open-ports 80 443 8443-8450
   sudo x-ui forward
   ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
   ./scripts/manage.sh protocol-guard
@@ -683,7 +685,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-19]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-20]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -704,6 +706,7 @@ main_loop() {
       17) ./scripts/network-check.sh; pause ;;
       18) ./scripts/manage.sh refresh-links; show_links; pause ;;
       19) ./scripts/manage.sh forward-web; pause ;;
+      20) ./scripts/manage.sh open-ports; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac

@@ -253,6 +253,7 @@ download_project() {
     "scripts/xui-builtin-subscription.sh"
     "scripts/mask-site.sh"
     "scripts/protocol-guard.sh"
+    "scripts/open-ports.sh"
     "scripts/network-check.sh"
     "scripts/reconcile.sh"
     "scripts/safe-update.sh"

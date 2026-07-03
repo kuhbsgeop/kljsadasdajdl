@@ -53,9 +53,15 @@ Commands:
   xui-subscription Configure 3x-ui built-in subscription behind HTTPS
   mask-site      Regenerate the static masquerade site
   network-check  Check A/AAAA records, IPv4/IPv6, and local listeners
+  open-ports     Batch open firewall ports with ufw/firewalld/iptables
   protocol-guard Disable or delete unsafe inbound protocols
   forward        Add/update a dokodemo-door/tunnel port forward
   forward-web    Open the port-forward web UI with token auto-filled
+
+Open ports examples:
+  ./scripts/manage.sh open-ports 80 443 8443-8450
+  ./scripts/manage.sh open-ports 8388/tcp 8388/udp 30000-30100/udp
+  ./scripts/manage.sh open-ports -p tcp,udp 10000,10001,10010-10020
 
 Forward examples:
   ./scripts/manage.sh forward
@@ -377,6 +383,10 @@ case "$cmd" in
     ;;
   protocol-guard)
     ./scripts/protocol-guard.sh
+    ;;
+  open-ports|ports|firewall)
+    shift
+    ./scripts/open-ports.sh "$@"
     ;;
   forward|port-forward|dokodemo|tunnel)
     shift

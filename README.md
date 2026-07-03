@@ -129,6 +129,7 @@ sudo 3xui-kit
 cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh status
 sudo ./scripts/manage.sh links
+sudo ./scripts/manage.sh open-ports 80 443 8443-8450
 sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 ```
 
@@ -165,6 +166,16 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 - `8388/tcp,udp`，默认 Shadowsocks 2022 使用
 
 如果启用 Trojan、Hysteria2 或 HTTPS 站点，脚本会继续放行对应端口。
+也可以手动批量放开端口：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh open-ports 80 443 8443-8450
+sudo ./scripts/manage.sh open-ports 8388/tcp 8388/udp 30000-30100/udp
+sudo ./scripts/manage.sh open-ports -p tcp,udp 10000,10001,10010-10020
+```
+
+脚本会优先使用 `ufw`，其次使用 `firewalld`，再退到运行时 `iptables` 规则。云服务器控制台里的安全组仍需要同步放行。
 
 ## 面板访问
 
@@ -452,6 +463,7 @@ sudo ./scripts/manage.sh autostart
 sudo ./scripts/manage.sh domain
 sudo ./scripts/manage.sh subscription
 sudo ./scripts/manage.sh xui-subscription
+sudo ./scripts/manage.sh open-ports 80 443 8443-8450
 sudo ./scripts/manage.sh refresh-links
 sudo ./scripts/manage.sh reconcile
 sudo ./scripts/manage.sh network-check
