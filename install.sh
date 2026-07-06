@@ -247,6 +247,7 @@ download_project() {
   mkdir -p "$INSTALL_DIR"
 
   local files=(
+    "one-click.sh"
     "compose.yaml"
     "scripts/manage.sh"
     "scripts/apply-presets.sh"
@@ -274,7 +275,7 @@ download_project() {
     download_file "$f" "${INSTALL_DIR}/${f}"
   done
 
-  chmod +x "${INSTALL_DIR}/scripts/"*.sh
+  chmod +x "${INSTALL_DIR}/one-click.sh" "${INSTALL_DIR}/scripts/"*.sh
 }
 
 install_cli_shortcut() {

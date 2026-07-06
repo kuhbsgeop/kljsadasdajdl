@@ -45,6 +45,7 @@ download_kit_file() {
 
 sync_kit_files() {
   local files=(
+    "one-click.sh"
     "compose.yaml"
     "scripts/manage.sh"
     "scripts/apply-presets.sh"
@@ -71,7 +72,7 @@ sync_kit_files() {
   for f in "${files[@]}"; do
     download_kit_file "$f" "$f"
   done
-  chmod +x scripts/*.sh
+  chmod +x one-click.sh scripts/*.sh
 }
 
 {

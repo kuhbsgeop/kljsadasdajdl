@@ -12,6 +12,28 @@
 
 ## 一键安装
 
+最短全自动一键部署：安装最新官方 3X-UI 镜像，自动安装本仓库脚本，自动套用默认协议预设、AdsPower Socks5 代理、订阅/转发页面、协议守卫，并安装 `x-ui` / `3xui-kit` 命令行面板。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/one-click.sh | sudo bash
+```
+
+带域名的一键部署：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/one-click.sh \
+  | sudo env 'DOMAIN_NAMES=example.com,www.example.com' bash
+```
+
+没有域名但需要公网 HTTP 打开面板时：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/one-click.sh \
+  | sudo env PUBLIC_HTTP_PANEL=1 bash
+```
+
+如果只是 SSH 里用命令行面板，推荐使用第一条默认命令；安装完成后运行 `sudo x-ui`。
+
 默认交互式安装：
 
 ```bash

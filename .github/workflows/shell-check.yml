@@ -11,6 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check bash syntax
         run: |
+          bash -n one-click.sh
           bash -n install.sh
           bash -n scripts/manage.sh
           bash -n scripts/apply-presets.sh
