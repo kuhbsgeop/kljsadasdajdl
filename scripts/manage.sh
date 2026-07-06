@@ -5,7 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 if [ -f .env ]; then
-  OVERRIDE_KEYS=(XUI_CONTAINER PANEL_PORT WEB_BASE_PATH SERVER_ADDR)
+  OVERRIDE_KEYS=(
+    XUI_CONTAINER PANEL_PORT WEB_BASE_PATH SERVER_ADDR
+    ENABLE_ADSPOWER_PROXY ADSPOWER_PROXY_REMARK ADSPOWER_PROXY_LISTEN ADSPOWER_PROXY_PORT
+    ADSPOWER_PROXY_USER ADSPOWER_PROXY_PASS ADSPOWER_PROXY_UDP
+  )
   for key in "${OVERRIDE_KEYS[@]}"; do
     if [ "${!key+x}" = "x" ]; then
       printf -v "__override_${key}" '%s' "${!key}"
@@ -30,6 +34,10 @@ SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
 SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
 HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
 SUB_CONFIG_ADMIN_TOKEN="${SUB_CONFIG_ADMIN_TOKEN:-}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
+ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
+ADSPOWER_PROXY_LISTEN="${ADSPOWER_PROXY_LISTEN:-0.0.0.0}"
 
 usage() {
   cat <<'EOF'
@@ -53,6 +61,7 @@ Commands:
   xui-subscription Configure 3x-ui built-in subscription behind HTTPS
   mask-site      Regenerate the static masquerade site
   network-check  Check A/AAAA records, IPv4/IPv6, and local listeners
+  adspower-proxy Add/update AdsPower fingerprint browser Socks5 proxy
   open-ports     Batch open firewall ports with ufw/firewalld/iptables
   protocol-guard Disable or delete unsafe inbound protocols
   forward        Add/update a dokodemo-door/tunnel port forward
@@ -62,6 +71,10 @@ Open ports examples:
   ./scripts/manage.sh open-ports 80 443 8443-8450
   ./scripts/manage.sh open-ports 8388/tcp 8388/udp 30000-30100/udp
   ./scripts/manage.sh open-ports -p tcp,udp 10000,10001,10010-10020
+
+AdsPower examples:
+  ./scripts/manage.sh adspower-proxy
+  ADSPOWER_PROXY_PORT=31082 ./scripts/manage.sh adspower-proxy
 
 Forward examples:
   ./scripts/manage.sh forward
@@ -200,6 +213,26 @@ open_forward_firewall() {
     firewall-cmd --reload >/dev/null 2>&1 || true
   else
     echo "No ufw/firewalld detected. If this is public, also open ${listen_port}/${network} in the VPS firewall/security group."
+  fi
+}
+
+open_adspower_firewall() {
+  case "${ADSPOWER_PROXY_LISTEN:-0.0.0.0}" in
+    127.0.0.1|localhost|::1)
+      echo "AdsPower proxy listens on ${ADSPOWER_PROXY_LISTEN}; no public firewall rule needed."
+      ;;
+    *)
+      ./scripts/open-ports.sh "${ADSPOWER_PROXY_PORT:-31081}/tcp" || true
+      ;;
+  esac
+}
+
+configure_adspower_proxy() {
+  ENABLE_ADSPOWER_PROXY=1 ./scripts/apply-presets.sh
+  open_adspower_firewall
+  if [ -f runtime/adspower-proxy.txt ]; then
+    echo
+    cat runtime/adspower-proxy.txt
   fi
 }
 
@@ -344,6 +377,7 @@ case "$cmd" in
       echo "Config files:"
       echo "  runtime/client-links.txt"
       echo "  runtime/panel-all-links.txt"
+      echo "  runtime/adspower-proxy.txt"
       echo
     fi
     if [ -f runtime/client-links.txt ]; then
@@ -356,6 +390,10 @@ case "$cmd" in
       echo
       echo "Panel-rendered links:"
       cat runtime/panel-all-links.txt
+    fi
+    if [ -s runtime/adspower-proxy.txt ]; then
+      echo
+      cat runtime/adspower-proxy.txt
     fi
     ;;
   token)
@@ -397,6 +435,9 @@ case "$cmd" in
     ;;
   network-check)
     ./scripts/network-check.sh
+    ;;
+  adspower-proxy|adsproxy|fingerprint-proxy)
+    configure_adspower_proxy
     ;;
   *)
     usage

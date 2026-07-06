@@ -17,6 +17,9 @@ WEB_BASE_PATH="${WEB_BASE_PATH:-panel}"
 PROTOCOL_GUARD_ACTION="${PROTOCOL_GUARD_ACTION:-disable}"
 SAFE_PROTOCOLS="${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}"
 REQUIRE_SECURE_TRANSPORT="${REQUIRE_SECURE_TRANSPORT:-0}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
+ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
 
 truthy() {
   case "${1:-}" in
@@ -64,6 +67,17 @@ has_secure_transport() {
   esac
 }
 
+is_managed_adspower_proxy() {
+  local protocol="$1"
+  local remark="$2"
+  truthy "${ENABLE_ADSPOWER_PROXY:-1}" || return 1
+  [ "$protocol" = "mixed" ] || return 1
+  case "$remark" in
+    "$ADSPOWER_PROXY_REMARK"|auto-adspower-mixed-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 main() {
   local token base list rows changed id protocol remark enable security reason
   token="$(api_token)"
@@ -78,6 +92,10 @@ main() {
 
   while IFS=$'\t' read -r id protocol remark enable security; do
     [ -n "$id" ] || continue
+    if is_managed_adspower_proxy "$protocol" "$remark"; then
+      echo "Keeping managed AdsPower proxy inbound: ${remark} (${protocol}, security=${security}, id=${id})"
+      continue
+    fi
     reason=""
     if ! is_safe_protocol "$protocol"; then
       reason="unsafe protocol"

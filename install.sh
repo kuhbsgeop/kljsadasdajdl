@@ -15,6 +15,8 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   TROJAN_PORT SHADOWSOCKS_PORT HYSTERIA_PORT
   ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
   DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY DOKODEMO_FORWARDS
+  ENABLE_ADSPOWER_PROXY ADSPOWER_PROXY_REMARK ADSPOWER_PROXY_LISTEN ADSPOWER_PROXY_PORT
+  ADSPOWER_PROXY_USER ADSPOWER_PROXY_PASS ADSPOWER_PROXY_UDP
   ENABLE_SUBCONVERTER SUBSCRIPTION_EXPAND_ALIASES
   XUI_BUILTIN_SUB_ENABLE XUI_BUILTIN_ALL_NODES XUI_BUILTIN_JSON_ENABLE XUI_BUILTIN_CLASH_ENABLE
   ENABLE_PROTOCOL_GUARD PROTOCOL_GUARD_ACTION SAFE_PROTOCOLS REQUIRE_SECURE_TRANSPORT
@@ -301,6 +303,12 @@ configure_firewall_ports() {
   fi
   if [ "${ENABLE_SHADOWSOCKS:-1}" = "1" ]; then
     ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
+  fi
+  if truthy "${ENABLE_ADSPOWER_PROXY:-1}"; then
+    case "${ADSPOWER_PROXY_LISTEN:-0.0.0.0}" in
+      127.0.0.1|localhost|::1) ;;
+      *) ports+=("${ADSPOWER_PROXY_PORT:-31081}/tcp") ;;
+    esac
   fi
   if [ "${ENABLE_TROJAN:-0}" = "1" ]; then
     local trojan_port
@@ -734,6 +742,13 @@ apply_existing_env_overrides() {
   ensure_env_var SHADOWSOCKS_PORT "8388"
   ensure_env_var TROJAN_PORT "9443"
   ensure_env_var HYSTERIA_PORT "8443"
+  ensure_env_var ENABLE_ADSPOWER_PROXY "1"
+  ensure_env_var ADSPOWER_PROXY_PORT "31081"
+  ensure_env_var ADSPOWER_PROXY_REMARK "auto-adspower-mixed-$(env_value ADSPOWER_PROXY_PORT)"
+  ensure_env_var ADSPOWER_PROXY_LISTEN "0.0.0.0"
+  ensure_env_var ADSPOWER_PROXY_USER "u$(random_hex 4)"
+  ensure_env_var ADSPOWER_PROXY_PASS "$(random_password)"
+  ensure_env_var ADSPOWER_PROXY_UDP "0"
   ensure_env_var SAFE_PROTOCOLS "vless,trojan,shadowsocks,wireguard,hysteria,tunnel"
   ensure_env_var PROTOCOL_GUARD_ACTION "disable"
   ensure_env_var ENABLE_PROTOCOL_GUARD "1"
@@ -773,6 +788,7 @@ write_env() {
   fi
 
   local base_path default_addr first_configured_domain server_addr_default enable_acme_default strict_domain_default use_domain_default https_site_default https_http_default all_nodes_sub_id default_sub_id
+  local adspower_proxy_port_default adspower_proxy_user_default adspower_proxy_pass_default adspower_proxy_remark_default
   base_path="${WEB_BASE_PATH:-p$(random_hex 9)}"
   base_path="${base_path#/}"
   default_addr="$(public_ip)"
@@ -800,6 +816,10 @@ write_env() {
   fi
   all_nodes_sub_id="${ALL_NODES_SUB_ID:-${DEFAULT_SUB_ID:-$(random_hex 8)}}"
   default_sub_id="${DEFAULT_SUB_ID:-$all_nodes_sub_id}"
+  adspower_proxy_port_default="${ADSPOWER_PROXY_PORT:-31081}"
+  adspower_proxy_user_default="${ADSPOWER_PROXY_USER:-u$(random_hex 4)}"
+  adspower_proxy_pass_default="${ADSPOWER_PROXY_PASS:-$(random_password)}"
+  adspower_proxy_remark_default="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${adspower_proxy_port_default}}"
 
   cat > .env <<EOF
 COMPOSE_PROJECT_NAME=3xui_selfhost
@@ -840,6 +860,13 @@ DOKODEMO_NETWORK=${DOKODEMO_NETWORK:-tcp}
 DOKODEMO_FOLLOW_REDIRECT=${DOKODEMO_FOLLOW_REDIRECT:-0}
 DOKODEMO_TPROXY=${DOKODEMO_TPROXY:-off}
 DOKODEMO_FORWARDS=
+ENABLE_ADSPOWER_PROXY=${ENABLE_ADSPOWER_PROXY:-1}
+ADSPOWER_PROXY_REMARK=${adspower_proxy_remark_default}
+ADSPOWER_PROXY_LISTEN=${ADSPOWER_PROXY_LISTEN:-0.0.0.0}
+ADSPOWER_PROXY_PORT=${adspower_proxy_port_default}
+ADSPOWER_PROXY_USER=${adspower_proxy_user_default}
+ADSPOWER_PROXY_PASS=${adspower_proxy_pass_default}
+ADSPOWER_PROXY_UDP=${ADSPOWER_PROXY_UDP:-0}
 SAFE_PROTOCOLS=${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}
 PROTOCOL_GUARD_ACTION=${PROTOCOL_GUARD_ACTION:-disable}
 ENABLE_PROTOCOL_GUARD=${ENABLE_PROTOCOL_GUARD:-1}
@@ -1057,7 +1084,20 @@ write_install_summary() {
   Reality target: ${REALITY_TARGET:-www.cloudflare.com:443}
   Reality server names: ${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
 
-6) Configure from command line
+6) AdsPower fingerprint browser proxy
+  Enabled: ${ENABLE_ADSPOWER_PROXY:-1}
+  3X-UI inbound protocol: mixed
+  AdsPower proxy type: Socks5
+  Host: ${SERVER_ADDR:-your-server}
+  Port: ${ADSPOWER_PROXY_PORT:-31081}
+  Username: ${ADSPOWER_PROXY_USER:-not generated yet}
+  Password: ${ADSPOWER_PROXY_PASS:-not generated yet}
+  Config file:
+    ${INSTALL_DIR}/runtime/adspower-proxy.txt
+  Test from your computer:
+    curl --socks5-hostname '${ADSPOWER_PROXY_USER:-user}:${ADSPOWER_PROXY_PASS:-pass}@${SERVER_ADDR:-your-server}:${ADSPOWER_PROXY_PORT:-31081}' https://api.ipify.org
+
+7) Configure from command line
   Edit environment:
     nano ${INSTALL_DIR}/.env
 
@@ -1089,7 +1129,10 @@ write_install_summary() {
   Add or update a port forward from the command line:
     ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 
-7) Manage
+  Refresh AdsPower / fingerprint browser proxy:
+    ./scripts/manage.sh adspower-proxy
+
+8) Manage
   cd ${INSTALL_DIR}
   x-ui
   3xui-kit
@@ -1098,25 +1141,26 @@ write_install_summary() {
   ./scripts/manage.sh update
   ./scripts/manage.sh backup
 
-8) Firewall reminder
+9) Firewall reminder
   Public: open ${reality_ports:-${REALITY_PORT:-443}/tcp} for VLESS REALITY.
   Public: open ${trojan_ports:-${TROJAN_PORT:-9443}/tcp} for Trojan WS TLS when Trojan is enabled.
+  Public: open ${ADSPOWER_PROXY_PORT:-31081}/tcp for AdsPower Socks5 when ENABLE_ADSPOWER_PROXY=1 and ADSPOWER_PROXY_LISTEN is public.
   Private: keep ${PANEL_PORT:-2053}/tcp closed to public internet when PANEL_LISTEN_IP=127.0.0.1.
 
-9) Autostart
+10) Autostart
   Docker container restart policy: unless-stopped
   systemd service: 3xui-kit.service
   Check status:
     systemctl status 3xui-kit.service --no-pager
 
-10) Domains and HTTPS
+11) Domains and HTTPS
   Domains: ${DOMAIN_NAMES:-not configured}
   ACME auto renew: ${ENABLE_ACME:-0}
   HTTPS masquerade site: ${HTTPS_SITE_ENABLE:-0}
   HTTP mode after certificate: ${HTTPS_HTTP_MODE:-reject}
   TLS cert in container: ${TLS_CERT_FILE:-not configured}
 
-11) Subscription converter
+12) Subscription converter
   Web UI:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/sub/' "${SERVER_ADDR:-your-server}" || printf 'http://%s:%s/sub/' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}")
   Forward web UI:
@@ -1142,7 +1186,7 @@ write_install_summary() {
   Note:
     If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup. Enable the HTTPS site from x-ui to use /sub/ over TLS.
 
-12) 3X-UI built-in subscription
+13) 3X-UI built-in subscription
   Listen:
     ${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}:${XUI_BUILTIN_SUB_PORT:-2096}
   All nodes subId:

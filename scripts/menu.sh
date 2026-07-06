@@ -49,6 +49,12 @@ XUI_BUILTIN_JSON_PATH="${XUI_BUILTIN_JSON_PATH:-}"
 XUI_BUILTIN_CLASH_PATH="${XUI_BUILTIN_CLASH_PATH:-}"
 SERVER_ALIASES="${SERVER_ALIASES:-}"
 PENDING_DOMAIN_NAMES="${PENDING_DOMAIN_NAMES:-}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
+ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
+ADSPOWER_PROXY_LISTEN="${ADSPOWER_PROXY_LISTEN:-0.0.0.0}"
+ADSPOWER_PROXY_USER="${ADSPOWER_PROXY_USER:-}"
+ADSPOWER_PROXY_PASS="${ADSPOWER_PROXY_PASS:-}"
 
 green=$'\033[0;32m'
 cyan=$'\033[0;36m'
@@ -259,20 +265,30 @@ write_runtime_summary() {
   Reality target: ${REALITY_TARGET}
   Reality server names: ${REALITY_SERVER_NAMES}
 
-6) Autostart
+6) AdsPower fingerprint browser proxy
+  Enabled: ${ENABLE_ADSPOWER_PROXY}
+  3X-UI inbound protocol: mixed
+  AdsPower proxy type: Socks5
+  Host: ${SERVER_ADDR}
+  Port: ${ADSPOWER_PROXY_PORT}
+  Username: ${ADSPOWER_PROXY_USER:-not generated yet}
+  Password: ${ADSPOWER_PROXY_PASS:-not generated yet}
+  Config file: ${ROOT_DIR}/runtime/adspower-proxy.txt
+
+7) Autostart
   Docker container restart policy: $(docker_restart_policy)
   systemd service: ${AUTOSTART_SERVICE}
   Check status:
     systemctl status ${AUTOSTART_SERVICE} --no-pager
 
-7) Domains and HTTPS
+8) Domains and HTTPS
   Domains: ${DOMAIN_NAMES:-not configured}
   TLS cert: ${TLS_CERT_FILE:-not configured}
   TLS key: ${TLS_KEY_FILE:-not configured}
   HTTPS site: ${HTTPS_SITE_ENABLE:-0}
   HTTP mode: ${HTTPS_HTTP_MODE:-reject}
 
-8) Subscription converter
+9) Subscription converter
   Web UI: $(web_origin)/sub/
   Forward web UI: $(web_origin)/forward/
   Local node subscription: $(web_origin)/subscriptions/${SUBSCRIPTION_TOKEN:-token}.txt
@@ -283,7 +299,7 @@ write_runtime_summary() {
   Forward editor token: ${SUB_CONFIG_ADMIN_TOKEN:-not generated yet}
   Note: If HTTPS_SITE_ENABLE=0 and HTTPS_HTTP_MODE=reject, public /sub/ is intentionally blocked after certificate setup.
 
-9) 3X-UI built-in subscription
+10) 3X-UI built-in subscription
   Listen: ${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}:${XUI_BUILTIN_SUB_PORT:-2096}
   Subscription prefix: $(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}
   Actual links require a subId. With DOMAIN_NODE_MODE=1, generated domain-node clients are synced to ALL_NODES_SUB_ID so the default all-nodes link follows DOMAIN_NAMES:
@@ -320,6 +336,7 @@ show_header() {
   echo "${green}18. 刷新全部入站订阅链接【使用 3.5.yaml 规则】${plain}"
   echo "${green}19. 打开端口转发 Web 页面【自动填Token】${plain}"
   echo "${green}20. 批量放开防火墙端口【ufw/firewalld/iptables】${plain}"
+  echo "${green}21. 创建/刷新 AdsPower 指纹浏览器代理【mixed/Socks5】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -347,6 +364,9 @@ show_status() {
   echo "默认协议: ${cyan}VLESS + TCP/Raw + XTLS Vision + REALITY${plain}"
   echo "REALITY端口: ${blue}${REALITY_PORT}${plain}"
   echo "REALITY目标: ${blue}${REALITY_TARGET}${plain}"
+  echo "AdsPower代理: ${cyan}3X-UI mixed / AdsPower Socks5${plain}  状态: ${blue}${ENABLE_ADSPOWER_PROXY}${plain}  地址: ${blue}${SERVER_ADDR}:${ADSPOWER_PROXY_PORT}${plain}"
+  echo "AdsPower账号: ${blue}${ADSPOWER_PROXY_USER:-未生成}${plain}  密码: ${blue}${ADSPOWER_PROXY_PASS:-未生成}${plain}"
+  echo "AdsPower配置: ${blue}${ROOT_DIR}/runtime/adspower-proxy.txt${plain}"
   echo "客户端链接: ${blue}${ROOT_DIR}/runtime/client-links.txt${plain}"
   echo "面板导出链接: ${blue}${ROOT_DIR}/runtime/panel-all-links.txt${plain}"
   echo "绑定域名: ${blue}${DOMAIN_NAMES:-未配置}${plain}"
@@ -457,6 +477,7 @@ protocol_presets_menu() {
   echo "5. 配置链式代理出口【socks/http/trojan】"
   echo "6. 添加 dokodemo-door 转发入站【3X-UI 中显示为 tunnel】"
   echo "7. 禁用不安全入站协议【vmess/http/mixed/mtproto/tun】"
+  echo "8. 创建/刷新 AdsPower 指纹浏览器代理【mixed/Socks5】"
   echo "0. 返回"
   read -r -p "请选择: " c </dev/tty || c=""
   case "$c" in
@@ -481,6 +502,7 @@ protocol_presets_menu() {
     7)
       PROTOCOL_GUARD_ACTION=disable ./scripts/protocol-guard.sh
       ;;
+    8) ./scripts/manage.sh adspower-proxy ;;
     *) return 0 ;;
   esac
 }
@@ -660,6 +682,7 @@ show_help() {
   ./scripts/manage.sh domain
   ./scripts/manage.sh subscription
   ./scripts/manage.sh xui-subscription
+  ./scripts/manage.sh adspower-proxy
   ./scripts/manage.sh open-ports 80 443 8443-8450
   sudo x-ui forward
   ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
@@ -673,6 +696,7 @@ show_help() {
   5. 输入域名申请证书前，请先把域名 A 记录解析到当前 VPS 公网 IP。
   6. 配置 HTTPS 证书后，80 端口默认拒绝 HTTP 明文访问；只有手动选择 HTTPS 伪装站点时才跳转到 HTTPS。
   7. 3X-UI 内置订阅服务绑定 127.0.0.1，并通过 HTTPS 随机路径反代，避免导出 http://:2096 链接。
+  8. AdsPower 代理使用 3X-UI mixed 入站，但在 AdsPower 里请选择 Socks5，不要选 HTTP。
 
 自启动:
   1. Docker Compose 已设置 restart: unless-stopped。
@@ -685,7 +709,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-20]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-21]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -707,6 +731,7 @@ main_loop() {
       18) ./scripts/manage.sh refresh-links; show_links; pause ;;
       19) ./scripts/manage.sh forward-web; pause ;;
       20) ./scripts/manage.sh open-ports; pause ;;
+      21) ./scripts/manage.sh adspower-proxy; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac

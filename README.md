@@ -1,6 +1,6 @@
 # 3x-ui Selfhost Kit
 
-自用一键部署项目：安装最新官方 `3x-ui`，默认生成 `VLESS + REALITY` 和 `Shadowsocks 2022` 节点，并把域名证书、Trojan TLS、链式代理、伪装站点、订阅转换 Web UI 都放进一个 `x-ui` 命令行菜单里。
+自用一键部署项目：安装最新官方 `3x-ui`，默认生成 `VLESS + REALITY`、`Shadowsocks 2022` 和 AdsPower 指纹浏览器可用的 `mixed/Socks5` 代理，并把域名证书、Trojan TLS、链式代理、伪装站点、订阅转换 Web UI 都放进一个 `x-ui` 命令行菜单里。
 
 仓库只保存部署脚本、Compose 和配置模板，不保存 3x-ui / Xray / acme.sh / subconverter 的上游代码。安装和更新时实时拉取：
 
@@ -35,6 +35,8 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 无域名模式会自动检测公网 IP 并写入 `SERVER_ADDR`。如果服务器检测到的 IP 不对，可以在命令中额外加上 `SERVER_ADDR=你的服务器公网IP`。
 上面的公网 HTTP 命令会把面板监听改成 `0.0.0.0`，并自动放行安装摘要里显示的随机面板端口。安装完成后直接打开 `http://公网IP:面板端口/随机路径/`。
+
+一键安装默认会创建 AdsPower / 指纹浏览器代理，端口 `31081/tcp`，在 AdsPower 中选择 `Socks5`。如果不想自动创建，可以在一键命令里加 `ENABLE_ADSPOWER_PROXY=0`。
 
 上面两条完整命令都可以用于覆盖安装：已有 `.env` 时不会重置面板账号、密码和数据库，但会把命令里显式传入的域名、HTTPS、订阅参数写回 `.env`，然后按当前模式刷新 Caddy、刷新 `/sub/`、`/forward/` 和 3X-UI 内置 `all-nodes` 订阅。
 
@@ -130,6 +132,7 @@ cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh status
 sudo ./scripts/manage.sh links
 sudo ./scripts/manage.sh open-ports 80 443 8443-8450
+sudo ./scripts/manage.sh adspower-proxy
 sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 ```
 
@@ -147,11 +150,12 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 - 随机面板用户名、密码、API token、根路径
 - `VLESS + TCP/Raw + XTLS Vision + REALITY`
 - `Shadowsocks 2022`
+- AdsPower / 指纹浏览器代理：3X-UI 入站协议为 `mixed`，AdsPower 里代理类型填写 `Socks5`
 - 80 端口普通伪装页面
 - 订阅转换 Web UI：`/sub/`
 - 端口转发 Web UI：`/forward/`，用当前服务器域名和端口访问其他域名/IP 的端口
 - 3X-UI 内置订阅服务的 HTTPS 反代 URI，避免面板导出 `http://:2096` 链接
-- 安全协议守护：默认禁用 `vmess/http/mixed/mtproto/tun` 入站，保留 `vless/trojan/shadowsocks/wireguard/hysteria/tunnel`；域名 HTTPS 模式默认启用 `REQUIRE_SECURE_TRANSPORT=1`，会继续禁用没有 `tls` 或 `reality` 传输安全的旧入站
+- 安全协议守护：默认禁用 `vmess/http/mixed/mtproto/tun` 入站，保留 `vless/trojan/shadowsocks/wireguard/hysteria/tunnel`；脚本托管的 `auto-adspower-mixed-*` 会作为 AdsPower Socks5 代理保留；域名 HTTPS 模式默认启用 `REQUIRE_SECURE_TRANSPORT=1`，会继续禁用没有 `tls` 或 `reality` 传输安全的旧入站
 - `dokodemo-door` 转发预设；在 3X-UI 官方面板中协议名显示为 `tunnel`
 - `3.5.yaml` 规则配置 Web 编辑器，使用安装时生成的编辑 token
 - Web 一键刷新全部 3X-UI 入站链接，并用本地 `3.5.yaml` 渲染 Clash 订阅
@@ -164,6 +168,7 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 - `80/tcp`
 - `443/tcp`
 - `8388/tcp,udp`，默认 Shadowsocks 2022 使用
+- `31081/tcp`，默认 AdsPower / 指纹浏览器 Socks5 代理使用
 
 如果启用 Trojan、Hysteria2 或 HTTPS 站点，脚本会继续放行对应端口。
 也可以手动批量放开端口：
@@ -295,6 +300,37 @@ cd /opt/3xui-selfhost-kit
 sudo ./scripts/manage.sh apply-presets
 ```
 
+创建或刷新 AdsPower / 指纹浏览器代理：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh adspower-proxy
+```
+
+默认会创建一个 3X-UI `mixed` 入站，端口是 `31081`。在 AdsPower 的代理编辑窗口里这样填：
+
+```text
+代理类型: Socks5
+主机: 服务器公网IP或域名
+端口: 31081
+代理账号: 查看 runtime/adspower-proxy.txt
+代理密码: 查看 runtime/adspower-proxy.txt
+```
+
+也可以直接查看脚本生成的填写信息：
+
+```bash
+sudo cat /opt/3xui-selfhost-kit/runtime/adspower-proxy.txt
+```
+
+测试命令示例：
+
+```bash
+curl --socks5-hostname '账号:密码@服务器公网IP:31081' https://api.ipify.org
+```
+
+注意：3X-UI 面板里的协议名是 `mixed`，但 AdsPower 里请选择 `Socks5`；不要选 HTTP。
+
 启用 Trojan TLS：
 
 ```bash
@@ -379,7 +415,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 sudo ./scripts/manage.sh protocol-guard
 ```
 
-默认允许列表是 `vless,trojan,shadowsocks,wireguard,hysteria,tunnel`。默认动作是禁用，不删除。域名 HTTPS 模式会设置 `REQUIRE_SECURE_TRANSPORT=1`，只保留带 `tls` 或 `reality` 传输安全的入站；如果要删除不安全入站：
+默认允许列表是 `vless,trojan,shadowsocks,wireguard,hysteria,tunnel`。默认动作是禁用，不删除。脚本创建的 `auto-adspower-mixed-*` 入站会被保留，因为它是给 AdsPower 使用的 Socks5 代理。域名 HTTPS 模式会设置 `REQUIRE_SECURE_TRANSPORT=1`，只保留带 `tls` 或 `reality` 传输安全的入站；如果要删除不安全入站：
 
 ```bash
 sudo PROTOCOL_GUARD_ACTION=delete ./scripts/protocol-guard.sh
@@ -463,6 +499,7 @@ sudo ./scripts/manage.sh autostart
 sudo ./scripts/manage.sh domain
 sudo ./scripts/manage.sh subscription
 sudo ./scripts/manage.sh xui-subscription
+sudo ./scripts/manage.sh adspower-proxy
 sudo ./scripts/manage.sh open-ports 80 443 8443-8450
 sudo ./scripts/manage.sh refresh-links
 sudo ./scripts/manage.sh reconcile

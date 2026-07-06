@@ -14,6 +14,8 @@ OVERRIDE_KEYS=(
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
   ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
   DOKODEMO_NETWORK DOKODEMO_FOLLOW_REDIRECT DOKODEMO_TPROXY DOKODEMO_FORWARDS RECREATE_DOKODEMO_INBOUND
+  ENABLE_ADSPOWER_PROXY ADSPOWER_PROXY_REMARK ADSPOWER_PROXY_LISTEN ADSPOWER_PROXY_PORT
+  ADSPOWER_PROXY_USER ADSPOWER_PROXY_PASS ADSPOWER_PROXY_UDP
   CHAIN_ENABLED CHAIN_MODE CHAIN_TYPE CHAIN_ADDRESS CHAIN_PORT CHAIN_USER CHAIN_PASS
   CHAIN_SERVER_NAME CHAIN_ALLOW_INSECURE
   PRESET_CLIENT_SUFFIX ALL_NODES_SUB_ID DEFAULT_SUB_ID XUI_BUILTIN_ALL_NODES RECREATE_MANAGED_INBOUNDS
@@ -48,6 +50,13 @@ DOMAIN_NODE_MODE="${DOMAIN_NODE_MODE:-1}"
 DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
 DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
 DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
+ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
+ADSPOWER_PROXY_LISTEN="${ADSPOWER_PROXY_LISTEN:-0.0.0.0}"
+ADSPOWER_PROXY_USER="${ADSPOWER_PROXY_USER:-}"
+ADSPOWER_PROXY_PASS="${ADSPOWER_PROXY_PASS:-}"
+ADSPOWER_PROXY_UDP="${ADSPOWER_PROXY_UDP:-0}"
 API_BASE="http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH#/}"
 
 mkdir -p runtime data/cert
@@ -85,6 +94,13 @@ set_env_var() {
   ' .env > "$tmp"
   mv "$tmp" .env
   chmod 600 .env
+}
+
+validate_port() {
+  local label="$1"
+  local port="$2"
+  [[ "$port" =~ ^[0-9]+$ ]] || { echo "${label} must be numeric: ${port}" >&2; exit 1; }
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || { echo "${label} out of range: ${port}" >&2; exit 1; }
 }
 
 ensure_preset_client_suffix() {
@@ -187,6 +203,11 @@ delete_inbound_by_remark() {
   done <<< "$ids"
 }
 
+inbound_id_by_remark() {
+  local remark="$1"
+  api_get "/panel/api/inbounds/list" | jq -r --arg remark "$remark" '.obj[]? | select(.remark == $remark) | .id' | awk 'NF { print; exit }'
+}
+
 recreate_inbound_if_requested() {
   local remark="$1"
   [ "${RECREATE_MANAGED_INBOUNDS:-0}" = "1" ] || return 0
@@ -205,6 +226,18 @@ add_inbound_if_missing() {
   resp="$(api_post_json "/panel/api/inbounds/add" "$file")"
   printf '%s\n' "$resp" | jq .
   printf '%s\n' "$resp" | jq -e '.success == true' >/dev/null
+}
+
+update_inbound_by_remark() {
+  local remark="$1"
+  local file="$2"
+  local id tmp
+  id="$(inbound_id_by_remark "$remark")"
+  [ -n "$id" ] || return 1
+  tmp="runtime/inbound-update-${id}.json"
+  jq --argjson id "$id" '.id = $id' "$file" > "$tmp"
+  echo "Updating inbound: $remark ($id)"
+  api_post_json "/panel/api/inbounds/update/${id}" "$tmp" | jq .
 }
 
 first_csv() {
@@ -1138,6 +1171,138 @@ write_shadowsocks_optional() {
   fi
 }
 
+ensure_adspower_proxy_env() {
+  if [ -z "${ADSPOWER_PROXY_PORT:-}" ]; then
+    ADSPOWER_PROXY_PORT="31081"
+    set_env_var ADSPOWER_PROXY_PORT "$ADSPOWER_PROXY_PORT"
+  fi
+  validate_port ADSPOWER_PROXY_PORT "$ADSPOWER_PROXY_PORT"
+
+  if [ -z "${ADSPOWER_PROXY_REMARK:-}" ]; then
+    ADSPOWER_PROXY_REMARK="auto-adspower-mixed-${ADSPOWER_PROXY_PORT}"
+    set_env_var ADSPOWER_PROXY_REMARK "$ADSPOWER_PROXY_REMARK"
+  fi
+  if [ -z "${ADSPOWER_PROXY_LISTEN:-}" ]; then
+    ADSPOWER_PROXY_LISTEN="0.0.0.0"
+    set_env_var ADSPOWER_PROXY_LISTEN "$ADSPOWER_PROXY_LISTEN"
+  fi
+  if [ -z "${ADSPOWER_PROXY_USER:-}" ]; then
+    ADSPOWER_PROXY_USER="u$(rand_hex 4)"
+    set_env_var ADSPOWER_PROXY_USER "$ADSPOWER_PROXY_USER"
+  fi
+  if [ -z "${ADSPOWER_PROXY_PASS:-}" ]; then
+    ADSPOWER_PROXY_PASS="$(rand_b64 18)"
+    set_env_var ADSPOWER_PROXY_PASS "$ADSPOWER_PROXY_PASS"
+  fi
+  if [ -z "${ADSPOWER_PROXY_UDP:-}" ]; then
+    ADSPOWER_PROXY_UDP="0"
+    set_env_var ADSPOWER_PROXY_UDP "$ADSPOWER_PROXY_UDP"
+  fi
+  export ADSPOWER_PROXY_PORT ADSPOWER_PROXY_REMARK ADSPOWER_PROXY_LISTEN ADSPOWER_PROXY_USER ADSPOWER_PROXY_PASS ADSPOWER_PROXY_UDP
+}
+
+write_adspower_proxy_info() {
+  local file="runtime/adspower-proxy.txt"
+  local host="${SERVER_ADDR:-YOUR_SERVER_IP}"
+  cat > "$file" <<EOF
+AdsPower fingerprint browser proxy
+
+Fill AdsPower proxy fields like this:
+  Proxy type: Socks5
+  Host: ${host}
+  Port: ${ADSPOWER_PROXY_PORT}
+  Proxy account: ${ADSPOWER_PROXY_USER}
+  Proxy password: ${ADSPOWER_PROXY_PASS}
+
+3X-UI inbound:
+  Protocol: mixed
+  Remark: ${ADSPOWER_PROXY_REMARK}
+  Listen: ${ADSPOWER_PROXY_LISTEN}
+
+Test:
+  curl --socks5-hostname '${ADSPOWER_PROXY_USER}:${ADSPOWER_PROXY_PASS}@${host}:${ADSPOWER_PROXY_PORT}' https://api.ipify.org
+
+Note:
+  Use Socks5 in AdsPower. The 3X-UI protocol is mixed, but the HTTP proxy mode may fail CONNECT checks in some clients.
+EOF
+  chmod 600 "$file"
+}
+
+write_adspower_proxy_optional() {
+  if [ "$(truthy "${ENABLE_ADSPOWER_PROXY:-1}")" != "true" ]; then
+    return 0
+  fi
+
+  ensure_adspower_proxy_env
+
+  local remark file config_listen
+  remark="$ADSPOWER_PROXY_REMARK"
+  file="runtime/adspower-mixed-${ADSPOWER_PROXY_PORT}.json"
+  config_listen="$ADSPOWER_PROXY_LISTEN"
+  case "$config_listen" in
+    0.0.0.0|::) config_listen="" ;;
+  esac
+
+  jq -n \
+    --arg remark "$remark" \
+    --arg listen "$config_listen" \
+    --argjson port "$ADSPOWER_PROXY_PORT" \
+    --arg shareAddr "${SERVER_ADDR:-}" \
+    --arg user "$ADSPOWER_PROXY_USER" \
+    --arg pass "$ADSPOWER_PROXY_PASS" \
+    --arg udp "$ADSPOWER_PROXY_UDP" \
+    '{
+      enable: true,
+      remark: $remark,
+      listen: $listen,
+      port: $port,
+      shareAddr: $shareAddr,
+      shareAddrStrategy: (if $shareAddr == "" then "listen" else "custom" end),
+      protocol: "mixed",
+      expiryTime: 0,
+      total: 0,
+      trafficReset: "never",
+      settings: {
+        accounts: [{user: $user, pass: $pass}],
+        auth: "password",
+        ip: "127.0.0.1",
+        udp: ($udp == "1" or $udp == "true" or $udp == "TRUE" or $udp == "yes" or $udp == "YES" or $udp == "on" or $udp == "ON")
+      },
+      streamSettings: {
+        network: "tcp",
+        tcpSettings: {header: {type: "none"}},
+        security: "none"
+      },
+      sniffing: {
+        enabled: false,
+        destOverride: ["http", "tls", "quic", "fakedns"],
+        metadataOnly: false,
+        routeOnly: false,
+        ipsExcluded: [],
+        domainsExcluded: []
+      }
+    }' > "$file"
+
+  recreate_inbound_if_requested "$remark"
+  if inbound_exists "$remark"; then
+    update_inbound_by_remark "$remark" "$file"
+  else
+    add_inbound_if_missing "$remark" "$file"
+  fi
+
+  write_adspower_proxy_info
+  {
+    echo "AdsPower fingerprint browser proxy"
+    echo "3X-UI protocol: mixed"
+    echo "AdsPower proxy type: Socks5"
+    echo "socks5://${ADSPOWER_PROXY_USER}:${ADSPOWER_PROXY_PASS}@${SERVER_ADDR:-YOUR_SERVER_IP}:${ADSPOWER_PROXY_PORT}"
+    echo "Config: runtime/adspower-proxy.txt"
+    echo
+  } >> runtime/client-links.txt
+
+  ensure_direct_inbound_route "in-${ADSPOWER_PROXY_PORT}-tcp" "AdsPower mixed/Socks5"
+}
+
 write_dokodemo_inbound() {
   local listen="$1"
   local port="$2"
@@ -1250,8 +1415,16 @@ write_dokodemo_optional() {
 ensure_dokodemo_direct_route() {
   local port="$1"
   local network="$2"
-  local resp template new tmp_out tag
+  local tag
   tag="in-${port}-${network}"
+  ensure_direct_inbound_route "$tag" "Dokodemo-door"
+}
+
+ensure_direct_inbound_route() {
+  local tag="$1"
+  local label="${2:-Inbound}"
+  local resp template new tmp_out safe_tag
+  safe_tag="$(printf '%s' "$tag" | tr -c 'A-Za-z0-9_.-' '_')"
   resp="$(api_post_form "/panel/api/xray/")"
   template="$(printf '%s' "$resp" | jq -r '.obj' | jq '.xraySetting')"
   new="$(jq --arg tag "$tag" '
@@ -1265,12 +1438,12 @@ ensure_dokodemo_direct_route() {
       )
   ' <<<"$template")"
 
-  tmp_out="runtime/xray-with-dokodemo-route.json"
+  tmp_out="runtime/xray-with-direct-route-${safe_tag}.json"
   printf '%s\n' "$new" > "$tmp_out"
   api_post_form "/panel/api/xray/update" \
     --data-urlencode "xraySetting=$(cat "$tmp_out")" \
     --data-urlencode "outboundTestUrl=https://www.google.com/generate_204" | jq .
-  echo "Dokodemo-door direct route ensured: ${tag} -> direct"
+  echo "${label} direct route ensured: ${tag} -> direct"
 }
 
 apply_chain_optional() {
@@ -1333,7 +1506,12 @@ apply_chain_optional() {
     .outbounds = ((.outbounds // []) | map(select(.tag != $tag)) + [$outbound])
     | if $mode == "all" then
         .routing = (.routing // {})
-        | .routing.rules = ([{type:"field", network:"tcp,udp", outboundTag:$tag}] + ((.routing.rules // []) | map(select(.outboundTag != $tag))))
+        | .routing.rules = (
+            (.routing.rules // []) as $rules
+            | ($rules | map(select((.inboundTag? != null) and (.outboundTag != $tag))))
+            + [{type:"field", network:"tcp,udp", outboundTag:$tag}]
+            + ($rules | map(select((.inboundTag? == null) and (.outboundTag != $tag))))
+          )
       else . end
   ' <<<"$template")"
 
@@ -1462,6 +1640,7 @@ write_vless_reality
 write_hysteria2_optional
 write_trojan_optional
 write_shadowsocks_optional
+write_adspower_proxy_optional
 write_dokodemo_optional
 apply_chain_optional
 sync_all_subscription_id

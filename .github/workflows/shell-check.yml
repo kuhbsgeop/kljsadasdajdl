@@ -18,5 +18,6 @@ jobs:
           bash -n scripts/subscription.sh
           bash -n scripts/start-services.sh
           bash -n scripts/open-ports.sh
+          bash -n scripts/protocol-guard.sh
           bash -n scripts/menu.sh
           python3 -m py_compile scripts/subconfig-api.py
