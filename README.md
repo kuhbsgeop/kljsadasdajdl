@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/in
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
-  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.heubhkldhuu.shop,heubhkldhuu.shop,www.heubhkldhuu.shop,sdadsasdddfff.icu,safkdsajfkajfasfdyidsf.sdadsasdddfff.icu,www.sdadsasdddfff.icu' DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 RECREATE_ON_DOMAIN_UPDATE=1 ENABLE_ACME=1 ACME_SERVER=letsencrypt ACME_FALLBACK_SERVER=zerossl REQUIRE_DOMAIN_ORIGIN=1 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_PROTOCOL_GUARD=1 REQUIRE_SECURE_TRANSPORT=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
+  | sudo env CONFIG_WIZARD=0 'DOMAIN_NAMES=fsdfsfsdfxcvxvg.hdfgdfgdfgsdasa.shop,hdfgdfgdfgsdasa.shop,www.hdfgdfgdfgsdasa.shop,sdadsasdddfff.icu,safkdsajfkajfasfdyidsf.sdadsasdddfff.icu,www.sdadsasdddfff.icu' DOMAIN_NODE_MODE=1 DOMAIN_PORT_MODE=1 RECREATE_ON_DOMAIN_UPDATE=1 ENABLE_ACME=1 ACME_SERVER=letsencrypt ACME_FALLBACK_SERVER=zerossl REQUIRE_DOMAIN_ORIGIN=1 STRICT_DOMAIN_CERT=0 USE_DOMAIN_FOR_LINKS=1 HTTPS_SITE_ENABLE=1 HTTPS_HTTP_MODE=redirect AUTO_ENABLE_TROJAN=1 ENABLE_TROJAN=1 ENABLE_PROTOCOL_GUARD=1 REQUIRE_SECURE_TRANSPORT=1 ENABLE_SUBCONVERTER=1 SUBSCRIPTION_EXPAND_ALIASES=1 XUI_BUILTIN_SUB_ENABLE=1 XUI_BUILTIN_ALL_NODES=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
 
 完整一键安装，没有域名时使用公网 IP + HTTP 入口：
@@ -127,7 +127,7 @@ sudo x-ui
 使用默认交互式安装时会进入配置向导。直接回车即可使用安全默认值；也可以输入一个或多个域名，例如：
 
 ```text
-heubhkldhuu.shop,www.heubhkldhuu.shop
+hdfgdfgdfgsdasa.shop,www.hdfgdfgdfgsdasa.shop
 ```
 
 安装完成会在命令行直接显示：
