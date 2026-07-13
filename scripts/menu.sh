@@ -337,6 +337,7 @@ show_header() {
   echo "${green}19. 打开端口转发 Web 页面【自动填Token】${plain}"
   echo "${green}20. 批量放开防火墙端口【ufw/firewalld/iptables】${plain}"
   echo "${green}21. 创建/刷新 AdsPower 指纹浏览器代理【mixed/Socks5】${plain}"
+  echo "${green}22. 安装/查看 RustDesk ID与中继服务器【hbbs/hbbr】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -349,6 +350,10 @@ show_status() {
   echo "服务器地址: ${blue}${SERVER_ADDR}${plain}"
   line
   echo "3x-ui容器状态: $(container_health)"
+  if docker inspect hbbs >/dev/null 2>&1 || docker inspect hbbr >/dev/null 2>&1; then
+    echo "RustDesk容器状态: hbbs=$(docker inspect -f '{{.State.Status}}' hbbs 2>/dev/null || printf 'not-found') hbbr=$(docker inspect -f '{{.State.Status}}' hbbr 2>/dev/null || printf 'not-found')"
+    echo "RustDesk客户端配置: ${blue}${ROOT_DIR}/runtime/rustdesk-server.txt${plain}"
+  fi
   echo "开机自启动: $(autostart_status)"
   echo "面板监听: ${cyan}${PANEL_LISTEN_IP}:${PANEL_PORT}${plain}"
   echo "面板路径: ${cyan}/${WEB_BASE_PATH}/ ${plain}"
@@ -684,6 +689,7 @@ show_help() {
   ./scripts/manage.sh xui-subscription
   ./scripts/manage.sh adspower-proxy
   ./scripts/manage.sh open-ports 80 443 8443-8450
+  ./scripts/manage.sh rustdesk status
   sudo x-ui forward
   ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
   ./scripts/manage.sh protocol-guard
@@ -709,7 +715,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-21]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-22]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -732,6 +738,7 @@ main_loop() {
       19) ./scripts/manage.sh forward-web; pause ;;
       20) ./scripts/manage.sh open-ports; pause ;;
       21) ./scripts/manage.sh adspower-proxy; pause ;;
+      22) ./scripts/manage.sh rustdesk install; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac

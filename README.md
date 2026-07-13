@@ -1,6 +1,6 @@
 # 3x-ui Selfhost Kit
 
-自用一键部署项目：安装最新官方 `3x-ui`，默认生成 `VLESS + REALITY`、`Shadowsocks 2022` 和 AdsPower 指纹浏览器可用的 `mixed/Socks5` 代理，并把域名证书、Trojan TLS、链式代理、伪装站点、订阅转换 Web UI 都放进一个 `x-ui` 命令行菜单里。
+自用一键部署项目：安装最新官方 `3x-ui` 和 RustDesk Server OSS，默认生成 `VLESS + REALITY`、`Shadowsocks 2022` 和 AdsPower 指纹浏览器可用的 `mixed/Socks5` 代理，并把域名证书、Trojan TLS、链式代理、伪装站点、订阅转换 Web UI、RustDesk ID/中继服务都放进一个 `x-ui` 命令行菜单里。
 
 仓库只保存部署脚本、Compose 和配置模板，不保存 3x-ui / Xray / acme.sh / subconverter 的上游代码。安装和更新时实时拉取：
 
@@ -155,6 +155,7 @@ sudo ./scripts/manage.sh status
 sudo ./scripts/manage.sh links
 sudo ./scripts/manage.sh open-ports 80 443 8443-8450
 sudo ./scripts/manage.sh adspower-proxy
+sudo ./scripts/manage.sh rustdesk status
 sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 ```
 
@@ -169,6 +170,7 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 默认自动部署：
 
 - 最新官方 3x-ui Docker 镜像
+- RustDesk Server OSS `hbbs`/`hbbr`，自动生成并显示客户端 ID 服务器、中继服务器和 Key
 - 随机面板用户名、密码、API token、根路径
 - `VLESS + TCP/Raw + XTLS Vision + REALITY`
 - `Shadowsocks 2022`
@@ -191,6 +193,7 @@ sudo x-ui forward 27677 127.0.0.1 9999 tcp 0.0.0.0
 - `443/tcp`
 - `8388/tcp,udp`，默认 Shadowsocks 2022 使用
 - `31081/tcp`，默认 AdsPower / 指纹浏览器 Socks5 代理使用
+- `21115-21119/tcp` 与 `21116/udp`，RustDesk ID、心跳、中继和 WebSocket 使用
 
 如果启用 Trojan、Hysteria2 或 HTTPS 站点，脚本会继续放行对应端口。
 也可以手动批量放开端口：
@@ -203,6 +206,27 @@ sudo ./scripts/manage.sh open-ports -p tcp,udp 10000,10001,10010-10020
 ```
 
 脚本会优先使用 `ufw`，其次使用 `firewalld`，再退到运行时 `iptables` 规则。云服务器控制台里的安全组仍需要同步放行。
+
+## RustDesk ID/中继服务器
+
+一键安装默认启用 RustDesk Server OSS。安装结束后，客户端资料保存在仅 root 可读的：
+
+```text
+/opt/3xui-selfhost-kit/runtime/rustdesk-server.txt
+```
+
+常用命令：
+
+```bash
+sudo x-ui                    # 选择菜单 22
+sudo ./scripts/manage.sh rustdesk install
+sudo ./scripts/manage.sh rustdesk status
+sudo ./scripts/manage.sh rustdesk restart
+sudo ./scripts/manage.sh rustdesk logs
+sudo ./scripts/manage.sh rustdesk uninstall
+```
+
+客户端的 API 服务器留空；OSS 版没有账户 API。两端客户端必须填写相同的 ID 服务器和 Key。除了系统防火墙，还要在 VPS 厂商安全组放行 TCP `21115-21119` 与 UDP `21116`。卸载命令只删除容器，默认保留 `/opt/rustdesk-server/data` 中的密钥和数据库，防止客户端 Key 意外变化。
 
 ## 面板访问
 

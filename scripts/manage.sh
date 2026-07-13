@@ -63,6 +63,7 @@ Commands:
   network-check  Check A/AAAA records, IPv4/IPv6, and local listeners
   adspower-proxy Add/update AdsPower fingerprint browser Socks5 proxy
   open-ports     Batch open firewall ports with ufw/firewalld/iptables
+  rustdesk       Install/manage RustDesk Server OSS (hbbs/hbbr)
   protocol-guard Disable or delete unsafe inbound protocols
   forward        Add/update a dokodemo-door/tunnel port forward
   forward-web    Open the port-forward web UI with token auto-filled
@@ -71,6 +72,8 @@ Open ports examples:
   ./scripts/manage.sh open-ports 80 443 8443-8450
   ./scripts/manage.sh open-ports 8388/tcp 8388/udp 30000-30100/udp
   ./scripts/manage.sh open-ports -p tcp,udp 10000,10001,10010-10020
+  ./scripts/manage.sh rustdesk install
+  ./scripts/manage.sh rustdesk status
 
 AdsPower examples:
   ./scripts/manage.sh adspower-proxy
@@ -425,6 +428,10 @@ case "$cmd" in
   open-ports|ports|firewall)
     shift
     ./scripts/open-ports.sh "$@"
+    ;;
+  rustdesk|rd)
+    shift
+    ./scripts/rustdesk.sh "${1:-status}"
     ;;
   forward|port-forward|dokodemo|tunnel)
     shift

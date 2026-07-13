@@ -13,6 +13,10 @@ fi
 
 docker compose up -d 3xui
 
+if [ "${ENABLE_RUSTDESK:-1}" = "1" ]; then
+  docker compose --profile rustdesk up -d hbbs hbbr
+fi
+
 if [ "${ENABLE_SUBCONVERTER:-1}" = "1" ]; then
   docker compose up -d subconverter
 fi

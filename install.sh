@@ -18,6 +18,7 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   ENABLE_ADSPOWER_PROXY ADSPOWER_PROXY_REMARK ADSPOWER_PROXY_LISTEN ADSPOWER_PROXY_PORT
   ADSPOWER_PROXY_USER ADSPOWER_PROXY_PASS ADSPOWER_PROXY_UDP
   ENABLE_SUBCONVERTER SUBSCRIPTION_EXPAND_ALIASES
+  ENABLE_RUSTDESK RUSTDESK_IMAGE RUSTDESK_DATA_DIR RUSTDESK_SERVER
   XUI_BUILTIN_SUB_ENABLE XUI_BUILTIN_ALL_NODES XUI_BUILTIN_JSON_ENABLE XUI_BUILTIN_CLASH_ENABLE
   ENABLE_PROTOCOL_GUARD PROTOCOL_GUARD_ACTION SAFE_PROTOCOLS REQUIRE_SECURE_TRANSPORT
 )
@@ -257,6 +258,7 @@ download_project() {
     "scripts/mask-site.sh"
     "scripts/protocol-guard.sh"
     "scripts/open-ports.sh"
+    "scripts/rustdesk.sh"
     "scripts/network-check.sh"
     "scripts/reconcile.sh"
     "scripts/safe-update.sh"
@@ -465,7 +467,7 @@ Requires=docker.service
 Type=oneshot
 WorkingDirectory=${INSTALL_DIR}
 ExecStart=/usr/bin/env bash ${INSTALL_DIR}/scripts/start-services.sh
-ExecStop=${docker_bin} compose stop 3xui subconverter subconfig-api caddy-site caddy-https
+ExecStop=${docker_bin} compose --profile rustdesk stop 3xui subconverter subconfig-api caddy-site caddy-https hbbs hbbr
 RemainAfterExit=yes
 TimeoutStartSec=0
 
@@ -926,6 +928,10 @@ XUI_BUILTIN_JSON_ENABLE=${XUI_BUILTIN_JSON_ENABLE:-0}
 XUI_BUILTIN_JSON_PATH=${XUI_BUILTIN_JSON_PATH:-/xui-json-$(random_hex 6)/}
 XUI_BUILTIN_CLASH_ENABLE=${XUI_BUILTIN_CLASH_ENABLE:-0}
 XUI_BUILTIN_CLASH_PATH=${XUI_BUILTIN_CLASH_PATH:-/xui-clash-$(random_hex 6)/}
+ENABLE_RUSTDESK=${ENABLE_RUSTDESK:-1}
+RUSTDESK_IMAGE=${RUSTDESK_IMAGE:-rustdesk/rustdesk-server:1.1.15}
+RUSTDESK_DATA_DIR=${RUSTDESK_DATA_DIR:-/opt/rustdesk-server/data}
+RUSTDESK_SERVER=${RUSTDESK_SERVER:-${SERVER_ADDR:-${server_addr_default}}}
 EOF
   chmod 600 .env
   set_env_var DOKODEMO_FORWARDS "${DOKODEMO_FORWARDS:-}"
@@ -1198,6 +1204,13 @@ write_install_summary() {
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s%s' "${SERVER_ADDR:-your-server}" "${XUI_BUILTIN_JSON_PATH:-/xui-json/}" || printf 'local-only until HTTPS is enabled')
   Clash URI:
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s%s' "${SERVER_ADDR:-your-server}" "${XUI_BUILTIN_CLASH_PATH:-/xui-clash/}" || printf 'local-only until HTTPS is enabled')
+
+14) RustDesk Server OSS
+  Enabled: ${ENABLE_RUSTDESK:-1}
+  Client configuration:
+    ${INSTALL_DIR}/runtime/rustdesk-server.txt
+  Manage:
+    ${INSTALL_DIR}/scripts/manage.sh rustdesk status
 EOF
   chmod 600 "$summary"
 }
@@ -1232,6 +1245,10 @@ main() {
   generate_mask_site
   configure_firewall_ports
   compose_up
+  if [ "${ENABLE_RUSTDESK:-1}" = "1" ]; then
+    log "Installing RustDesk Server OSS."
+    (cd "$INSTALL_DIR" && ./scripts/rustdesk.sh install)
+  fi
   install_systemd_autostart
   wait_panel_db
   configure_panel
