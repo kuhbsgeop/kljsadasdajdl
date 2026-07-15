@@ -203,9 +203,9 @@ write_web_ui() {
 <body>
   <main>
     <h1>订阅转换</h1>
-    <p>本页使用当前 VPS 上的 subconverter 后端。默认订阅地址来自安装脚本生成的节点文件；也可以填入你自己的远程订阅 URL。</p>
-    <label for="url">订阅 URL</label>
-    <textarea id="url"></textarea>
+    <p>本页和生成的订阅都使用当前服务器域名。输入远程订阅或节点链接后，可把节点自动填入本机或远程的 3.5.yaml 分流规则。</p>
+    <label for="url">订阅链接</label>
+    <textarea id="url" placeholder="可输入远程订阅 URL，或每行一条节点链接"></textarea>
     <div class="grid">
       <div>
         <label for="target">目标格式</label>
@@ -220,11 +220,12 @@ write_web_ui() {
         </select>
       </div>
       <div>
-        <label for="config">规则配置</label>
+        <label for="config">远程配置 / 规则模板</label>
         <input id="config">
       </div>
     </div>
     <button onclick="build()">生成转换链接</button>
+    <button onclick="openResult()">打开生成链接</button>
     <button onclick="refreshLinks()">刷新全部入站链接</button>
     <button class="secondary" onclick="copyResult()">复制</button>
     <button class="secondary" onclick="copyClash35()">复制 3.5 订阅</button>
@@ -234,12 +235,16 @@ write_web_ui() {
     <label>转换链接</label>
     <code id="result"></code>
     <label>全部入站订阅</label>
-    <code id="allLinksStatus">使用规则编辑 Token 可从 3X-UI 刷新 all-nodes 客户端；域名节点模式会按 SERVER_ALIASES 一对一生成多个域名节点。</code>
+    <code id="allLinksStatus">使用规则编辑 Token 可从服务器刷新 all-nodes 客户端；域名节点模式会按 SERVER_ALIASES 一对一生成多个域名节点。</code>
     <section class="editor">
       <h1>3.5.yaml 规则</h1>
       <p>转换链接默认使用这份规则配置。保存时请保留节点名称，分流组会按这些名称匹配。</p>
       <label for="adminToken">规则编辑 Token</label>
       <input id="adminToken" type="password" autocomplete="off">
+      <label for="ruleFile">上传 YAML 规则文件</label>
+      <input id="ruleFile" type="file" accept=".yaml,.yml,text/yaml,application/yaml,text/plain">
+      <button onclick="uploadRules()">上传并保存为服务器规则</button>
+      <button class="secondary" onclick="validateRules()">验证 YAML 语法</button>
       <button class="secondary" onclick="loadRules()">读取规则</button>
       <button onclick="saveRules()">保存规则</button>
       <label for="configEditor">规则内容</label>
@@ -252,24 +257,35 @@ write_web_ui() {
     const defaultConfig = location.origin + "/sub/config/3.5.yaml";
     const rawSub = location.origin + "/subscriptions/" + token + ".txt";
     const localSub = location.origin + "/subscriptions/" + token + ".b64";
-    const clash35 = location.origin + "/subconfig-api/render/clash?token=" + encodeURIComponent(token);
     const urlEl = document.getElementById("url");
     const targetEl = document.getElementById("target");
     const configEl = document.getElementById("config");
     const resultEl = document.getElementById("result");
     const adminTokenEl = document.getElementById("adminToken");
+    const ruleFileEl = document.getElementById("ruleFile");
     const configEditorEl = document.getElementById("configEditor");
     const editStatusEl = document.getElementById("editStatus");
     urlEl.value = localStorage.getItem("xuiSubSource") || localSub;
     targetEl.value = localStorage.getItem("xuiSubTarget") || "clash-35";
     configEl.value = localStorage.getItem("xuiSubConfig") || defaultConfig;
     adminTokenEl.value = localStorage.getItem("xuiSubConfigAdminToken") || "";
+    function buildClash35Link() {
+      const params = new URLSearchParams({token});
+      const source = urlEl.value.trim();
+      const config = configEl.value.trim();
+      if (source && source !== localSub && source !== rawSub) params.set("source", source);
+      if (config && config !== defaultConfig) params.set("config", config);
+      return location.origin + "/subconfig-api/render/clash?" + params.toString();
+    }
     function build() {
       const targetValue = targetEl.value;
       const config = configEl.value.trim();
       const source = urlEl.value.trim();
+      localStorage.setItem("xuiSubSource", source);
+      localStorage.setItem("xuiSubTarget", targetValue);
+      localStorage.setItem("xuiSubConfig", config || defaultConfig);
       if (targetValue === "clash-35") {
-        resultEl.textContent = clash35;
+        resultEl.textContent = buildClash35Link();
         return;
       }
       const params = new URLSearchParams();
@@ -285,11 +301,16 @@ write_web_ui() {
       if (config) params.set("config", config);
       resultEl.textContent = location.origin + "/subconverter/sub?" + params.toString();
     }
+    function openResult() {
+      build();
+      if (resultEl.textContent) window.open(resultEl.textContent, "_blank", "noopener,noreferrer");
+    }
     async function copyResult() {
       if (!resultEl.textContent) build();
       await navigator.clipboard.writeText(resultEl.textContent);
     }
     async function copyClash35() {
+      const clash35 = buildClash35Link();
       await navigator.clipboard.writeText(clash35);
       resultEl.textContent = clash35;
     }
@@ -303,8 +324,8 @@ write_web_ui() {
         if (!response.ok || !data.success) throw new Error(data.error || response.statusText);
         localStorage.setItem("xuiSubConfigAdminToken", adminTokenEl.value.trim());
         document.getElementById("allLinksStatus").textContent =
-          "已刷新 " + data.count + " 条链接。原始订阅: " + rawSub + "    3.5.yaml订阅: " + clash35;
-        resultEl.textContent = clash35;
+          "已刷新 " + data.count + " 条链接。原始订阅: " + rawSub + "    3.5.yaml订阅: " + buildClash35Link();
+        resultEl.textContent = buildClash35Link();
       } catch (error) {
         document.getElementById("allLinksStatus").textContent = "刷新失败: " + error.message;
       }
@@ -315,12 +336,19 @@ write_web_ui() {
       localStorage.setItem("xuiSubConfig", configEl.value.trim() || defaultConfig);
       build();
     }
-    async function configApi(method, body) {
+    async function configApi(method, body, path = "/config") {
       const headers = {"X-Admin-Token": adminTokenEl.value.trim()};
       if (body !== undefined) headers["Content-Type"] = "text/yaml; charset=utf-8";
-      const response = await fetch(location.origin + "/subconfig-api/config", {method, headers, body});
+      const response = await fetch(location.origin + "/subconfig-api" + path, {method, headers, body});
       const text = await response.text();
-      if (!response.ok) throw new Error(text || response.statusText);
+      if (!response.ok) {
+        let message = text || response.statusText;
+        try {
+          const data = JSON.parse(text);
+          message = data.error || data.message || message;
+        } catch (_) {}
+        throw new Error(message);
+      }
       return text;
     }
     async function loadRules() {
@@ -335,17 +363,41 @@ write_web_ui() {
     }
     async function saveRules() {
       try {
-        editStatusEl.textContent = "正在保存...";
+        editStatusEl.textContent = "正在验证 YAML 语法...";
         localStorage.setItem("xuiSubConfigAdminToken", adminTokenEl.value.trim());
+        await configApi("POST", configEditorEl.value, "/validate");
+        editStatusEl.textContent = "语法正确，正在保存...";
         await configApi("PUT", configEditorEl.value);
         configEl.value = defaultConfig;
         saveDefaults();
-        editStatusEl.textContent = "已保存。新的转换链接会继续使用 /sub/config/3.5.yaml。";
+        editStatusEl.textContent = "YAML 语法正确并已保存。现在可以生成转换链接。";
       } catch (error) {
         editStatusEl.textContent = "保存失败: " + error.message;
       }
     }
+    async function validateRules() {
+      try {
+        editStatusEl.textContent = "正在验证 YAML 语法...";
+        localStorage.setItem("xuiSubConfigAdminToken", adminTokenEl.value.trim());
+        await configApi("POST", configEditorEl.value, "/validate");
+        editStatusEl.textContent = "YAML 语法正确，可以保存。";
+      } catch (error) {
+        editStatusEl.textContent = "语法错误，未保存: " + error.message;
+      }
+    }
+    async function uploadRules() {
+      try {
+        const file = ruleFileEl.files && ruleFileEl.files[0];
+        if (!file) throw new Error("请先选择 .yaml 或 .yml 文件");
+        editStatusEl.textContent = "正在读取并上传 " + file.name + "...";
+        configEditorEl.value = await file.text();
+        await saveRules();
+      } catch (error) {
+        editStatusEl.textContent = "上传失败: " + error.message;
+      }
+    }
     build();
+    if (adminTokenEl.value) loadRules();
   </script>
 </body>
 </html>
@@ -359,7 +411,7 @@ start_subscription_services() {
   docker compose pull subconverter
   docker compose up -d subconverter
   if [ "${ENABLE_SUB_CONFIG_EDITOR:-1}" = "1" ]; then
-    docker compose pull subconfig-api
+    docker compose build --pull subconfig-api
     docker compose up -d --force-recreate subconfig-api
   fi
 }
@@ -384,7 +436,7 @@ refresh_links_from_api() {
         } > runtime/client-links.txt
         chmod 600 runtime/client-links.txt 2>/dev/null || true
       fi
-      echo "Subscription links refreshed from 3X-UI all-nodes clients."
+      echo "Subscription links refreshed from all-nodes clients."
       return 0
     fi
     sleep 1

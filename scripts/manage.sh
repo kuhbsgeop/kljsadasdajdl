@@ -361,6 +361,9 @@ case "$cmd" in
       cp -p data/db/x-ui.db "data/backups/x-ui-${ts}.db"
     fi
     cp -p .env "data/backups/env-${ts}.txt"
+    if [ -s site/sub/config/3.5.yaml ]; then
+      cp -p site/sub/config/3.5.yaml "data/backups/rules-${ts}.yaml"
+    fi
     chmod 600 data/backups/*"${ts}"* 2>/dev/null || true
     echo "Backup written to data/backups/*${ts}*"
     ;;

@@ -17,6 +17,9 @@ if [ -f data/db/x-ui.db ]; then
   cp -p data/db/x-ui.db "data/backups/x-ui-before-update-${ts}.db"
 fi
 cp -p .env "data/backups/env-before-update-${ts}.txt"
+if [ -s site/sub/config/3.5.yaml ]; then
+  cp -p site/sub/config/3.5.yaml "data/backups/rules-before-update-${ts}.yaml"
+fi
 chmod 600 data/backups/*"${ts}"* 2>/dev/null || true
 
 cat > "$run_file" <<'EOF'
@@ -60,12 +63,13 @@ sync_kit_files() {
     "scripts/reconcile.sh"
     "scripts/safe-update.sh"
     "scripts/subconfig-api.py"
+    "subconfig-api/Dockerfile"
+    "subconfig-api/requirements.txt"
     "scripts/start-services.sh"
     "scripts/menu.sh"
     "caddy/Caddyfile"
     "site/index.html"
     "site/forward/index.html"
-    "site/sub/config/3.5.yaml"
     "README.md"
     "SECURITY.md"
   )
@@ -73,6 +77,7 @@ sync_kit_files() {
   for f in "${files[@]}"; do
     download_kit_file "$f" "$f"
   done
+  echo "Preserving uploaded subscription rules: site/sub/config/3.5.yaml"
   chmod +x one-click.sh scripts/*.sh
 }
 
@@ -106,6 +111,7 @@ echo "Safe update started in background."
 echo "Backup:"
 echo "  data/backups/x-ui-before-update-${ts}.db"
 echo "  data/backups/env-before-update-${ts}.txt"
+echo "  data/backups/rules-before-update-${ts}.yaml"
 echo "Log:"
 echo "  $log_file"
 echo

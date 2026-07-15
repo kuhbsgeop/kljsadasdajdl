@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 import hmac
+import ipaddress
 import os
+import socket
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, unquote, urlparse, urlunparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 import base64
 import json
 import re
+import yaml
 
 
 CONFIG_PATH = Path(os.environ.get("SUB_CONFIG_PATH", "/config/3.5.yaml"))
@@ -17,12 +20,172 @@ ADMIN_TOKEN = os.environ.get("SUB_CONFIG_ADMIN_TOKEN", "")
 SUBSCRIPTION_TOKEN = os.environ.get("SUBSCRIPTION_TOKEN", "")
 SUBSCRIPTION_DIR = Path(os.environ.get("SUBSCRIPTION_DIR", "/subscriptions"))
 MAX_BYTES = int(os.environ.get("SUB_CONFIG_MAX_BYTES", "2097152"))
+MAX_SOURCE_BYTES = int(os.environ.get("SUB_SOURCE_MAX_BYTES", "4194304"))
+MAX_SOURCE_LINKS = int(os.environ.get("SUB_SOURCE_MAX_LINKS", "2000"))
+SOURCE_FETCH_TIMEOUT = int(os.environ.get("SUB_SOURCE_FETCH_TIMEOUT", "15"))
+ALLOW_PRIVATE_SOURCES = os.environ.get("SUB_SOURCE_ALLOW_PRIVATE", "0") == "1"
 XUI_API_BASE = os.environ.get("XUI_API_BASE", "").rstrip("/")
 XUI_API_TOKEN = os.environ.get("XUI_API_TOKEN", "")
 SERVER_ALIASES = os.environ.get("SERVER_ALIASES", "")
 EXPAND_ALIASES = os.environ.get("SUBSCRIPTION_EXPAND_ALIASES", "1") == "1"
 ALL_NODES_SUB_ID = os.environ.get("ALL_NODES_SUB_ID", "")
 DOMAIN_NODE_MODE = os.environ.get("DOMAIN_NODE_MODE", "1") in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
+SUPPORTED_LINK_SCHEMES = ("vless", "vmess", "trojan", "ss", "hysteria2")
+LOCAL_CONFIG_CACHE = {"mtime_ns": None, "size": None, "text": None}
+
+
+def validate_remote_url(value):
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Remote source must use http:// or https://.")
+    if not parsed.hostname:
+        raise ValueError("Remote source host is missing.")
+    if parsed.username or parsed.password:
+        raise ValueError("Credentials in remote source URLs are not supported.")
+    if ALLOW_PRIVATE_SOURCES:
+        return value
+
+    try:
+        addresses = socket.getaddrinfo(
+            parsed.hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as exc:
+        raise ValueError(f"Remote source DNS lookup failed: {exc}") from exc
+    if not addresses:
+        raise ValueError("Remote source DNS lookup returned no address.")
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if not ip.is_global:
+            raise ValueError("Remote source resolves to a private or reserved address.")
+    return value
+
+
+class SafeRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_remote_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_remote_text(value):
+    validate_remote_url(value)
+    request = Request(
+        value,
+        headers={
+            "Accept": "text/plain, text/yaml, application/yaml, */*;q=0.8",
+            "User-Agent": "ClashMeta/3xui-selfhost-kit",
+        },
+    )
+    opener = build_opener(SafeRedirectHandler())
+    try:
+        with opener.open(request, timeout=SOURCE_FETCH_TIMEOUT) as response:
+            raw = response.read(MAX_SOURCE_BYTES + 1)
+            if len(raw) > MAX_SOURCE_BYTES:
+                raise ValueError("Remote source is too large.")
+            charset = response.headers.get_content_charset() or "utf-8"
+    except HTTPError as exc:
+        raise ValueError(f"Remote source returned HTTP {exc.code}.") from exc
+    except URLError as exc:
+        raise ValueError(f"Remote source request failed: {exc.reason}") from exc
+    try:
+        return raw.decode(charset)
+    except (LookupError, UnicodeDecodeError):
+        return raw.decode("utf-8", errors="replace")
+
+
+def decode_base64_text(value):
+    compact = re.sub(r"\s+", "", value)
+    if not compact or not re.fullmatch(r"[A-Za-z0-9_+/=-]+", compact):
+        return ""
+    try:
+        padding = "=" * (-len(compact) % 4)
+        return base64.urlsafe_b64decode((compact + padding).encode("ascii")).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return ""
+
+
+def extract_subscription_links(value):
+    links = []
+    prefixes = tuple(scheme + "://" for scheme in SUPPORTED_LINK_SCHEMES)
+    for raw_line in value.replace("\ufeff", "").splitlines():
+        line = raw_line.strip().lstrip("- ").strip().strip("'\"")
+        if line.lower().startswith(prefixes):
+            links.append(line)
+    if not links:
+        decoded = decode_base64_text(value)
+        if decoded and decoded != value:
+            return extract_subscription_links(decoded)
+    return unique_links(links)[:MAX_SOURCE_LINKS]
+
+
+def load_source_links(source):
+    source = (source or "").strip()
+    if not source:
+        return read_subscription_links()
+
+    direct = extract_subscription_links(source)
+    if direct:
+        return direct
+
+    links = []
+    items = [line.strip() for line in source.splitlines() if line.strip()]
+    if not items:
+        raise ValueError("Subscription source is empty.")
+    for item in items:
+        if not item.lower().startswith(("http://", "https://")):
+            raise ValueError("Subscription source must be a remote URL or supported node link.")
+        links.extend(extract_subscription_links(fetch_remote_text(item)))
+        if len(links) >= MAX_SOURCE_LINKS:
+            break
+    links = unique_links(links)[:MAX_SOURCE_LINKS]
+    if not links:
+        raise ValueError("No supported nodes were found in the subscription source.")
+    return links
+
+
+def validate_config_text(value):
+    missing = []
+    for section in ("proxies", "proxy-groups", "rules"):
+        if not re.search(rf"(?m)^{re.escape(section)}:\s*$", value):
+            missing.append(section + ":")
+    if missing:
+        raise ValueError("Config missing required sections: " + ", ".join(missing))
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.MarkedYAMLError as exc:
+        mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+        problem = getattr(exc, "problem", None) or str(exc).splitlines()[0]
+        if mark is not None:
+            raise ValueError(
+                f"YAML syntax error at line {mark.line + 1}, column {mark.column + 1}: {problem}"
+            ) from exc
+        raise ValueError(f"YAML syntax error: {problem}") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"YAML syntax error: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("YAML root must be a mapping.")
+    return value
+
+
+def load_config_text(source):
+    source = (source or "").strip()
+    if not source:
+        if not CONFIG_PATH.exists():
+            raise ValueError("Config file not found.")
+        stat = CONFIG_PATH.stat()
+        if (
+            LOCAL_CONFIG_CACHE["text"] is not None
+            and LOCAL_CONFIG_CACHE["mtime_ns"] == stat.st_mtime_ns
+            and LOCAL_CONFIG_CACHE["size"] == stat.st_size
+        ):
+            return LOCAL_CONFIG_CACHE["text"]
+        text = validate_config_text(CONFIG_PATH.read_text(encoding="utf-8"))
+        LOCAL_CONFIG_CACHE.update(mtime_ns=stat.st_mtime_ns, size=stat.st_size, text=text)
+        return text
+    if not source.lower().startswith(("http://", "https://")):
+        raise ValueError("Remote config must use http:// or https://.")
+    return validate_config_text(fetch_remote_text(source))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -101,6 +264,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/validate":
+            self.validate_config()
+            return
         if path == "/refresh-links":
             self.refresh_links()
             return
@@ -121,25 +287,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            self.send_text(400, "Bad Content-Length.")
-            return
-        if length <= 0 or length > MAX_BYTES:
-            self.send_text(413, "Config is empty or too large.")
-            return
-
-        raw = self.rfile.read(length)
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            self.send_text(400, "Config must be UTF-8.")
-            return
-
-        required = ("proxies:", "proxy-groups:", "rules:")
-        missing = [key for key in required if key not in text]
-        if missing:
-            self.send_text(400, "Config missing required sections: " + ", ".join(missing))
+            text = self.read_config_body()
+            validate_config_text(text)
+        except ValueError as exc:
+            self.send_text(400, str(exc))
             return
 
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -151,6 +302,32 @@ class Handler(BaseHTTPRequestHandler):
         os.replace(tmp_name, CONFIG_PATH)
         os.chmod(CONFIG_PATH, 0o644)
         self.send_text(200, "Saved.")
+
+    def read_config_body(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise ValueError("Bad Content-Length.") from exc
+        if length <= 0:
+            raise ValueError("Config is empty.")
+        if length > MAX_BYTES:
+            raise ValueError("Config is too large.")
+        raw = self.rfile.read(length)
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Config must be UTF-8.") from exc
+
+    def validate_config(self):
+        if not self.require_auth():
+            return
+        try:
+            text = self.read_config_body()
+            validate_config_text(text)
+        except ValueError as exc:
+            self.send_json(400, {"success": False, "error": str(exc)})
+            return
+        self.send_json(200, {"success": True, "message": "YAML syntax is valid."})
 
     def get_links(self):
         if not self.require_auth():
@@ -220,20 +397,14 @@ class Handler(BaseHTTPRequestHandler):
     def render_clash(self, parsed):
         params = parse_qs(parsed.query)
         token = params.get("token", [""])[0]
+        source = params.get("source", [""])[0]
+        config_source = params.get("config", [""])[0]
         if not token or not SUBSCRIPTION_TOKEN or not hmac.compare_digest(token, SUBSCRIPTION_TOKEN):
             self.send_text(401, "Unauthorized.")
             return
-        if not CONFIG_PATH.exists():
-            self.send_text(404, "Config file not found.")
-            return
-        sub_path = SUBSCRIPTION_DIR / f"{SUBSCRIPTION_TOKEN}.txt"
-        if not sub_path.exists():
-            self.send_text(404, "Subscription file not found.")
-            return
         try:
-            config_text = CONFIG_PATH.read_text(encoding="utf-8")
-            links = [line.strip() for line in sub_path.read_text(encoding="utf-8").splitlines()]
-            links = [line for line in links if re.match(r"^(vless|trojan|ss)://", line)]
+            config_text = load_config_text(config_source)
+            links = load_source_links(source)
             rendered = render_clash_config(config_text, links)
         except Exception as exc:
             self.send_text(500, f"Render failed: {exc}")
@@ -253,12 +424,7 @@ def read_subscription_links():
     path = subscription_txt_path()
     if not path.exists():
         return []
-    links = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if re.match(r"^(vless|vmess|trojan|ss|hysteria2)://", line):
-            links.append(line)
-    return links
+    return extract_subscription_links(path.read_text(encoding="utf-8"))
 
 
 def xui_json(path):
@@ -657,16 +823,19 @@ def parse_node(link):
         sid = query.get("sid", [""])[0]
         fp = query.get("fp", ["chrome"])[0]
         flow = query.get("flow", [""])[0]
+        network = query.get("type", query.get("network", ["tcp"]))[0]
+        security = query.get("security", ["reality" if pbk else "none"])[0]
         parts = [
             f"name: {q(name)}",
             f"server: {q(host)}",
             f"port: {port}",
             "type: vless",
             f"uuid: {q(uuid)}",
-            "tls: true",
-            "network: tcp",
+            f"network: {q(network)}",
             "udp: true",
         ]
+        if security in ("tls", "reality"):
+            parts.append("tls: true")
         if flow:
             parts.append(f"flow: {q(flow)}")
         if sni:
@@ -678,6 +847,59 @@ def parse_node(link):
             if sid:
                 reality += f", short-id: {q(sid)}"
             parts.append(f"reality-opts: {{{reality}}}")
+        if network == "ws":
+            path = query.get("path", ["/"])[0]
+            ws_host = query.get("host", [sni or host])[0]
+            parts.append(f"ws-opts: {{path: {q(path)}, headers: {{Host: {q(ws_host)}}}}}")
+        elif network == "grpc":
+            service = query.get("serviceName", query.get("service-name", [""]))[0]
+            if service:
+                parts.append(f"grpc-opts: {{grpc-service-name: {q(service)}}}")
+        return parts
+
+    if scheme == "vmess":
+        payload = link.split("://", 1)[1].split("#", 1)[0]
+        decoded = decode_base64_text(payload)
+        if not decoded:
+            return None
+        try:
+            data = json.loads(decoded)
+            host = str(data.get("add") or "").strip()
+            port = validate_port(data.get("port"), "vmess port")
+            alter_id = int(data.get("aid") or 0)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            return None
+        if not host or not data.get("id"):
+            return None
+        name = str(data.get("ps") or name)
+        network = str(data.get("net") or "tcp")
+        parts = [
+            f"name: {q(name)}",
+            f"server: {q(host)}",
+            f"port: {port}",
+            "type: vmess",
+            f"uuid: {q(data.get('id'))}",
+            f"alterId: {alter_id}",
+            f"cipher: {q(data.get('scy') or 'auto')}",
+            f"network: {q(network)}",
+            "udp: true",
+        ]
+        if str(data.get("tls") or "").lower() in ("tls", "true", "1"):
+            parts.append("tls: true")
+        sni = str(data.get("sni") or "")
+        if sni:
+            parts.append(f"servername: {q(sni)}")
+        fp = str(data.get("fp") or "")
+        if fp:
+            parts.append(f"client-fingerprint: {q(fp)}")
+        if network == "ws":
+            path = str(data.get("path") or "/")
+            ws_host = str(data.get("host") or sni or host)
+            parts.append(f"ws-opts: {{path: {q(path)}, headers: {{Host: {q(ws_host)}}}}}")
+        elif network == "grpc":
+            service = str(data.get("path") or data.get("serviceName") or "")
+            if service:
+                parts.append(f"grpc-opts: {{grpc-service-name: {q(service)}}}")
         return parts
 
     if scheme == "trojan":
@@ -702,17 +924,25 @@ def parse_node(link):
         return parts
 
     if scheme == "ss":
-        if "@" in parsed.netloc:
-            userinfo = unquote(parsed.netloc.rsplit("@", 1)[0])
+        body = link.split("://", 1)[1].split("#", 1)[0].split("?", 1)[0]
+        if "@" in body:
+            userinfo, hostport = body.rsplit("@", 1)
+            userinfo = unquote(userinfo)
+            decoded = userinfo if ":" in userinfo else decode_base64_text(userinfo)
         else:
-            userinfo = unquote(parsed.username or "")
-        if ":" in userinfo:
-            decoded = userinfo
-        else:
-            padding = "=" * (-len(userinfo) % 4)
-            decoded = base64.urlsafe_b64decode((userinfo + padding).encode()).decode("utf-8")
-        method, *password_parts = decoded.split(":")
-        password = ":".join(password_parts)
+            decoded = decode_base64_text(body)
+            if "@" not in decoded:
+                return None
+            decoded, hostport = decoded.rsplit("@", 1)
+        if ":" not in decoded:
+            return None
+        method, password = decoded.split(":", 1)
+        server = urlparse("//" + hostport)
+        host = server.hostname or ""
+        try:
+            port = parse_port(server)
+        except ValueError:
+            return None
         return [
             f"name: {q(name)}",
             f"server: {q(host)}",
@@ -722,6 +952,30 @@ def parse_node(link):
             f"password: {q(password)}",
             "udp: true",
         ]
+
+    if scheme == "hysteria2":
+        password = unquote(parsed.username or "")
+        sni = query.get("sni", [host])[0]
+        parts = [
+            f"name: {q(name)}",
+            f"server: {q(host)}",
+            f"port: {port}",
+            "type: hysteria2",
+            f"password: {q(password)}",
+            "udp: true",
+        ]
+        if sni:
+            parts.append(f"sni: {q(sni)}")
+        insecure = query.get("insecure", query.get("allowInsecure", ["0"]))[0]
+        if str(insecure).lower() in ("1", "true", "yes"):
+            parts.append("skip-cert-verify: true")
+        obfs = query.get("obfs", [""])[0]
+        obfs_password = query.get("obfs-password", query.get("obfsParam", [""]))[0]
+        if obfs:
+            parts.append(f"obfs: {q(obfs)}")
+        if obfs_password:
+            parts.append(f"obfs-password: {q(obfs_password)}")
+        return parts
 
     return None
 
@@ -766,7 +1020,7 @@ def unique_name(name, used):
 def rendered_node_names(links, names):
     rendered = []
     used = set()
-    target_count = max(len(links), len(names)) if names else len(links)
+    target_count = len(links)
     for idx in range(target_count):
         link = links[idx % len(links)]
         if names:

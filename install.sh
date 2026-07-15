@@ -263,6 +263,8 @@ download_project() {
     "scripts/reconcile.sh"
     "scripts/safe-update.sh"
     "scripts/subconfig-api.py"
+    "subconfig-api/Dockerfile"
+    "subconfig-api/requirements.txt"
     "scripts/start-services.sh"
     "scripts/menu.sh"
     "caddy/Caddyfile"
@@ -274,6 +276,10 @@ download_project() {
   )
 
   for f in "${files[@]}"; do
+    if [ "$f" = "site/sub/config/3.5.yaml" ] && [ -s "${INSTALL_DIR}/${f}" ]; then
+      log "Preserving uploaded subscription rules: ${INSTALL_DIR}/${f}"
+      continue
+    fi
     download_file "$f" "${INSTALL_DIR}/${f}"
   done
 
@@ -760,7 +766,6 @@ apply_existing_env_overrides() {
   ensure_env_var SUBCONVERTER_IMAGE "tindy2013/subconverter:latest"
   ensure_env_var SUBCONVERTER_PORT "25500"
   ensure_env_var ENABLE_SUB_CONFIG_EDITOR "1"
-  ensure_env_var SUB_CONFIG_API_IMAGE "python:3-alpine"
   ensure_env_var SUB_CONFIG_PORT "27880"
   ensure_env_var XUI_API_BASE "http://127.0.0.1:$(awk -F= '$1=="PANEL_PORT"{print $2; exit}' .env)/$(awk -F= '$1=="WEB_BASE_PATH"{print $2; exit}' .env)"
   ensure_env_var XUI_BUILTIN_SUB_LISTEN "127.0.0.1"
@@ -906,7 +911,6 @@ SUBCONVERTER_IMAGE=${SUBCONVERTER_IMAGE:-tindy2013/subconverter:latest}
 SUBCONVERTER_PORT=${SUBCONVERTER_PORT:-25500}
 SUBSCRIPTION_TOKEN=${SUBSCRIPTION_TOKEN:-}
 ENABLE_SUB_CONFIG_EDITOR=${ENABLE_SUB_CONFIG_EDITOR:-1}
-SUB_CONFIG_API_IMAGE=${SUB_CONFIG_API_IMAGE:-python:3-alpine}
 SUB_CONFIG_PORT=${SUB_CONFIG_PORT:-27880}
 SUB_CONFIG_ADMIN_TOKEN=${SUB_CONFIG_ADMIN_TOKEN:-}
 SERVER_ALIASES=${SERVER_ALIASES:-${DOMAIN_NAMES:-${SERVER_ADDR:-${server_addr_default}}}}

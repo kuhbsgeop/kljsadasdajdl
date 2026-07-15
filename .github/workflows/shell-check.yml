@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Python dependencies
+        run: python3 -m pip install --requirement subconfig-api/requirements.txt
       - name: Check bash syntax
         run: |
           bash -n one-click.sh
@@ -23,3 +25,4 @@ jobs:
           bash -n scripts/protocol-guard.sh
           bash -n scripts/menu.sh
           python3 -m py_compile scripts/subconfig-api.py
+          python3 -m unittest discover -s tests -v
