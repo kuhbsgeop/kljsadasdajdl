@@ -10,26 +10,26 @@
 ## 默认
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/one-click.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-click.sh | sudo bash
 ```
 
 ## 域名 HTTPS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/one-click.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-click.sh \
   | sudo env 'DOMAIN_NAMES=example.com,www.example.com' bash
 ```
 
 ## 公网 IP + HTTP
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/one-click.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-click.sh \
   | sudo env PUBLIC_HTTP_PANEL=1 bash
 ```
 
 ## 交互安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/install.sh \
   | sudo env CONFIG_WIZARD=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```

@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import json
 import socket
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -38,6 +39,22 @@ class SubscriptionSourceTests(unittest.TestCase):
     def test_private_remote_source_is_rejected(self, _getaddrinfo):
         with self.assertRaisesRegex(ValueError, "private or reserved"):
             api.validate_remote_url("https://internal.example/sub")
+
+
+class ShortLinkTests(unittest.TestCase):
+    def test_short_link_persists_direct_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(api, "SHORT_LINK_DIR", Path(tmp)):
+                short_id, count = api.save_short_link(VLESS + "\n" + TROJAN)
+                source, config = api.load_short_link(short_id)
+                self.assertEqual(count, 2)
+                self.assertEqual(source, VLESS + "\n" + TROJAN)
+                self.assertEqual(config, "")
+                self.assertLessEqual(len(short_id), 32)
+
+    def test_short_link_rejects_path_traversal(self):
+        with self.assertRaisesRegex(ValueError, "Invalid short link id"):
+            api.short_link_path("../../secret")
 
 
 class NodeParserTests(unittest.TestCase):
@@ -95,6 +112,29 @@ rules:
         self.assertIn("type: trojan", rendered)
         self.assertIn("placeholder-a@example.net", rendered)
         self.assertNotIn("server: example.com", rendered)
+
+    def test_node_count_and_groups_match_input(self):
+        proxies = "\n".join(
+            f"  - {{name: {index}, server: old.example, port: 443, type: vmess}}"
+            for index in range(1, 21)
+        )
+        group_nodes = "\n".join(f"      - {index}" for index in range(1, 21))
+        config = (
+            "port: 7890\nproxies:\n" + proxies + "\nproxy-groups:\n"
+            "  - name: manual\n    type: select\n    proxies:\n" + group_nodes +
+            "\nrules:\n  - MATCH,manual\n"
+        )
+        link_base = VLESS.rsplit("#", 1)[0]
+        for count in (1, 5, 20, 21):
+            with self.subTest(count=count):
+                rendered = api.render_clash_config(
+                    config,
+                    [f"{link_base}#node-{index}" for index in range(1, count + 1)],
+                )
+                parsed = api.yaml.safe_load(rendered)
+                expected = [str(i) for i in range(1, count + 1)]
+                self.assertEqual([proxy["name"] for proxy in parsed["proxies"]], expected)
+                self.assertEqual(parsed["proxy-groups"][0]["proxies"], expected)
 
     def test_config_requires_expected_sections(self):
         with self.assertRaisesRegex(ValueError, "proxy-groups"):

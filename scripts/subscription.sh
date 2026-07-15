@@ -203,9 +203,9 @@ write_web_ui() {
 <body>
   <main>
     <h1>订阅转换</h1>
-    <p>本页和生成的订阅都使用当前服务器域名。输入远程订阅或节点链接后，可把节点自动填入本机或远程的 3.5.yaml 分流规则。</p>
-    <label for="url">订阅链接</label>
-    <textarea id="url" placeholder="可输入远程订阅 URL，或每行一条节点链接"></textarea>
+    <p>把面板“导入入站链接”中的完整节点连接粘贴到这里，每行一条。生成结果会自动套用服务器上保存的 3.5.yaml 规则；也兼容远程订阅 URL。</p>
+    <label for="url">节点连接（每行一条）</label>
+    <textarea id="url" placeholder="vless://...&#10;trojan://...&#10;ss://..."></textarea>
     <div class="grid">
       <div>
         <label for="target">目标格式</label>
@@ -224,15 +224,15 @@ write_web_ui() {
         <input id="config">
       </div>
     </div>
-    <button onclick="build()">生成转换链接</button>
+    <button onclick="build()">生成短链接</button>
     <button onclick="openResult()">打开生成链接</button>
     <button onclick="refreshLinks()">刷新全部入站链接</button>
-    <button class="secondary" onclick="copyResult()">复制</button>
-    <button class="secondary" onclick="copyClash35()">复制 3.5 订阅</button>
+    <button class="secondary" onclick="copyResult()">复制短链接</button>
+    <button class="secondary" onclick="copyClash35()">重新生成 Clash 短链接</button>
     <button class="secondary" onclick="saveDefaults()">保存为默认</button>
     <a class="button" href="https://acl4ssr-sub.github.io/" target="_blank" rel="noreferrer">打开 ACL4SSR 公共页面</a>
     <a class="button" href="/sub/config/3.5.yaml" target="_blank" rel="noreferrer">查看 3.5.yaml</a>
-    <label>转换链接</label>
+    <label>短订阅链接</label>
     <code id="result"></code>
     <label>全部入站订阅</label>
     <code id="allLinksStatus">使用规则编辑 Token 可从服务器刷新 all-nodes 客户端；域名节点模式会按 SERVER_ALIASES 一对一生成多个域名节点。</code>
@@ -265,28 +265,51 @@ write_web_ui() {
     const ruleFileEl = document.getElementById("ruleFile");
     const configEditorEl = document.getElementById("configEditor");
     const editStatusEl = document.getElementById("editStatus");
-    urlEl.value = localStorage.getItem("xuiSubSource") || localSub;
+    const storedSource = localStorage.getItem("xuiSubSource") || "";
+    urlEl.value = storedSource === localSub || storedSource === rawSub ? "" : storedSource;
     targetEl.value = localStorage.getItem("xuiSubTarget") || "clash-35";
     configEl.value = localStorage.getItem("xuiSubConfig") || defaultConfig;
     adminTokenEl.value = localStorage.getItem("xuiSubConfigAdminToken") || "";
-    function buildClash35Link() {
-      const params = new URLSearchParams({token});
+    urlEl.addEventListener("input", () => { resultEl.dataset.url = ""; });
+    configEl.addEventListener("input", () => { resultEl.dataset.url = ""; });
+    targetEl.addEventListener("change", () => { resultEl.dataset.url = ""; });
+    async function buildClash35Link() {
       const source = urlEl.value.trim();
       const config = configEl.value.trim();
-      if (source) params.set("source", source);
-      if (config && config !== defaultConfig) params.set("config", config);
-      return location.origin + "/subconfig-api/render/clash?" + params.toString();
+      if (!source) throw new Error("请先粘贴至少一条节点连接");
+      const response = await fetch(location.origin + "/subconfig-api/shorten?token=" + encodeURIComponent(token), {
+        method: "POST",
+        headers: {"Content-Type": "application/json; charset=utf-8"},
+        body: JSON.stringify({source, config: config && config !== defaultConfig ? config : ""})
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || response.statusText);
+      return {url: location.origin + data.path, count: data.count};
     }
-    function build() {
+    async function build() {
       const targetValue = targetEl.value;
       const config = configEl.value.trim();
       const source = urlEl.value.trim();
       localStorage.setItem("xuiSubSource", source);
       localStorage.setItem("xuiSubTarget", targetValue);
       localStorage.setItem("xuiSubConfig", config || defaultConfig);
+      if (!source) {
+        resultEl.textContent = "请先粘贴至少一条节点连接。";
+        return "";
+      }
       if (targetValue === "clash-35") {
-        resultEl.textContent = buildClash35Link();
-        return;
+        try {
+          resultEl.textContent = "正在生成短链接...";
+          const result = await buildClash35Link();
+          resultEl.textContent = result.url;
+          resultEl.title = "已保存 " + result.count + " 个节点";
+          resultEl.dataset.url = result.url;
+          return result.url;
+        } catch (error) {
+          resultEl.textContent = "生成失败: " + error.message;
+          resultEl.dataset.url = "";
+          return "";
+        }
       }
       const params = new URLSearchParams();
       for (const [index, part] of targetValue.split("&").entries()) {
@@ -299,20 +322,24 @@ write_web_ui() {
       }
       params.set("url", source);
       if (config) params.set("config", config);
-      resultEl.textContent = location.origin + "/subconverter/sub?" + params.toString();
+      const result = location.origin + "/subconverter/sub?" + params.toString();
+      resultEl.textContent = result;
+      resultEl.dataset.url = result;
+      return result;
     }
-    function openResult() {
-      build();
-      if (resultEl.textContent) window.open(resultEl.textContent, "_blank", "noopener,noreferrer");
+    async function openResult() {
+      const targetWindow = window.open("about:blank", "_blank");
+      const result = await build();
+      if (result && targetWindow) targetWindow.location.href = result;
+      else if (targetWindow) targetWindow.close();
     }
     async function copyResult() {
-      if (!resultEl.textContent) build();
-      await navigator.clipboard.writeText(resultEl.textContent);
+      const result = resultEl.dataset.url || await build();
+      if (result) await navigator.clipboard.writeText(result);
     }
     async function copyClash35() {
-      const clash35 = buildClash35Link();
-      await navigator.clipboard.writeText(clash35);
-      resultEl.textContent = clash35;
+      const result = await build();
+      if (result) await navigator.clipboard.writeText(result);
     }
     async function refreshLinks() {
       try {
@@ -323,18 +350,20 @@ write_web_ui() {
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || response.statusText);
         localStorage.setItem("xuiSubConfigAdminToken", adminTokenEl.value.trim());
+        urlEl.value = localSub;
+        localStorage.setItem("xuiSubSource", localSub);
+        const result = await build();
         document.getElementById("allLinksStatus").textContent =
-          "已刷新 " + data.count + " 条链接。原始订阅: " + rawSub + "    3.5.yaml订阅: " + buildClash35Link();
-        resultEl.textContent = buildClash35Link();
+          "已刷新 " + data.count + " 条链接。原始订阅: " + rawSub + "    短订阅: " + result;
       } catch (error) {
         document.getElementById("allLinksStatus").textContent = "刷新失败: " + error.message;
       }
     }
-    function saveDefaults() {
+    async function saveDefaults() {
       localStorage.setItem("xuiSubSource", urlEl.value.trim());
       localStorage.setItem("xuiSubTarget", targetEl.value);
       localStorage.setItem("xuiSubConfig", configEl.value.trim() || defaultConfig);
-      build();
+      return await build();
     }
     async function configApi(method, body, path = "/config") {
       const headers = {"X-Admin-Token": adminTokenEl.value.trim()};
@@ -369,7 +398,7 @@ write_web_ui() {
         editStatusEl.textContent = "语法正确，正在保存...";
         await configApi("PUT", configEditorEl.value);
         configEl.value = defaultConfig;
-        saveDefaults();
+        await saveDefaults();
         editStatusEl.textContent = "YAML 语法正确并已保存。现在可以生成转换链接。";
       } catch (error) {
         editStatusEl.textContent = "保存失败: " + error.message;
@@ -396,7 +425,7 @@ write_web_ui() {
         editStatusEl.textContent = "上传失败: " + error.message;
       }
     }
-    build();
+    resultEl.textContent = urlEl.value ? "节点连接已恢复，点击“生成短链接”。" : "请粘贴节点连接后生成短链接。";
     if (adminTokenEl.value) loadRules();
   </script>
 </body>

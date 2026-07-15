@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main}"
+REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 
 INSTALL_ENV_OVERRIDE_KEYS=(

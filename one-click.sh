@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/3xui-selfhost-kit/main}"
+REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main}"
 
 log() { printf '[3xui-one-click] %s\n' "$*"; }
 die() { printf '[3xui-one-click] ERROR: %s\n' "$*" >&2; exit 1; }

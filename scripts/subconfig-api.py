@@ -2,6 +2,7 @@
 import hmac
 import ipaddress
 import os
+import secrets
 import socket
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,7 @@ CONFIG_PATH = Path(os.environ.get("SUB_CONFIG_PATH", "/config/3.5.yaml"))
 ADMIN_TOKEN = os.environ.get("SUB_CONFIG_ADMIN_TOKEN", "")
 SUBSCRIPTION_TOKEN = os.environ.get("SUBSCRIPTION_TOKEN", "")
 SUBSCRIPTION_DIR = Path(os.environ.get("SUBSCRIPTION_DIR", "/subscriptions"))
+SHORT_LINK_DIR = Path(os.environ.get("SUB_SHORT_LINK_DIR", "/data/short-links"))
 MAX_BYTES = int(os.environ.get("SUB_CONFIG_MAX_BYTES", "2097152"))
 MAX_SOURCE_BYTES = int(os.environ.get("SUB_SOURCE_MAX_BYTES", "4194304"))
 MAX_SOURCE_LINKS = int(os.environ.get("SUB_SOURCE_MAX_LINKS", "2000"))
@@ -32,6 +34,7 @@ ALL_NODES_SUB_ID = os.environ.get("ALL_NODES_SUB_ID", "")
 DOMAIN_NODE_MODE = os.environ.get("DOMAIN_NODE_MODE", "1") in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
 SUPPORTED_LINK_SCHEMES = ("vless", "vmess", "trojan", "ss", "hysteria2")
 LOCAL_CONFIG_CACHE = {"mtime_ns": None, "size": None, "text": None}
+SHORT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,32}$")
 
 
 def validate_remote_url(value):
@@ -144,6 +147,59 @@ def load_source_links(source):
     return links
 
 
+def short_link_path(short_id):
+    if not SHORT_ID_RE.fullmatch(short_id or ""):
+        raise ValueError("Invalid short link id.")
+    return SHORT_LINK_DIR / f"{short_id}.json"
+
+
+def save_short_link(source, config_source=""):
+    source = (source or "").strip()
+    config_source = (config_source or "").strip()
+    if not source:
+        raise ValueError("Paste at least one node link.")
+    links = load_source_links(source)
+    if config_source:
+        load_config_text(config_source)
+
+    SHORT_LINK_DIR.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        {"source": source, "config": config_source},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    for _ in range(10):
+        short_id = secrets.token_urlsafe(8)
+        path = short_link_path(short_id)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+        return short_id, len(links)
+    raise RuntimeError("Could not allocate a short link id.")
+
+
+def load_short_link(short_id):
+    path = short_link_path(short_id)
+    if not path.exists():
+        raise FileNotFoundError("Short link not found.")
+    if path.stat().st_size > MAX_SOURCE_BYTES:
+        raise ValueError("Short link record is too large.")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Short link record is invalid.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Short link record is invalid.")
+    source = payload.get("source", "")
+    config_source = payload.get("config", "")
+    if not isinstance(source, str) or not isinstance(config_source, str) or not source.strip():
+        raise ValueError("Short link record is invalid.")
+    return source, config_source
+
+
 def validate_config_text(value):
     missing = []
     for section in ("proxies", "proxy-groups", "rules"):
@@ -194,12 +250,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
-    def send_text(self, status, body, content_type="text/plain; charset=utf-8"):
+    def send_text(self, status, body, content_type="text/plain; charset=utf-8", extra_headers=None):
         data = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-Content-Type-Options", "nosniff")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -249,6 +307,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/render/clash":
             self.render_clash(parsed)
             return
+        if path.startswith("/s/"):
+            self.render_short_link(path[3:])
+            return
         if path == "/links":
             self.get_links()
             return
@@ -266,6 +327,9 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/validate":
             self.validate_config()
+            return
+        if path == "/shorten":
+            self.create_short_link()
             return
         if path == "/refresh-links":
             self.refresh_links()
@@ -376,7 +440,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError as exc:
             raise ValueError("Bad Content-Length.") from exc
-        if length <= 0 or length > 65536:
+        if length <= 0 or length > 262144:
             raise ValueError("Request body is empty or too large.")
         raw = self.rfile.read(length)
         try:
@@ -409,7 +473,49 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_text(500, f"Render failed: {exc}")
             return
-        self.send_text(200, rendered, "text/yaml; charset=utf-8")
+        self.send_clash(rendered)
+
+    def create_short_link(self):
+        params = parse_qs(urlparse(self.path).query)
+        token = params.get("token", [""])[0]
+        if not token or not SUBSCRIPTION_TOKEN or not hmac.compare_digest(token, SUBSCRIPTION_TOKEN):
+            self.send_json(401, {"success": False, "error": "Unauthorized."})
+            return
+        try:
+            payload = self.read_json_body()
+            short_id, count = save_short_link(payload.get("source", ""), payload.get("config", ""))
+        except Exception as exc:
+            self.send_json(400, {"success": False, "error": str(exc)})
+            return
+        self.send_json(
+            200,
+            {"success": True, "id": short_id, "path": f"/subconfig-api/s/{short_id}", "count": count},
+        )
+
+    def render_short_link(self, short_id):
+        try:
+            source, config_source = load_short_link(short_id)
+            config_text = load_config_text(config_source)
+            links = load_source_links(source)
+            rendered = render_clash_config(config_text, links)
+        except FileNotFoundError:
+            self.send_text(404, "Short link not found.")
+            return
+        except Exception as exc:
+            self.send_text(500, f"Render failed: {exc}")
+            return
+        self.send_clash(rendered)
+
+    def send_clash(self, rendered):
+        self.send_text(
+            200,
+            rendered,
+            "text/yaml; charset=utf-8",
+            {
+                "Content-Disposition": 'inline; filename="clash.yaml"',
+                "Cache-Control": "no-store",
+            },
+        )
 
 
 def subscription_txt_path():
@@ -1021,12 +1127,16 @@ def rendered_node_names(links, names):
     rendered = []
     used = set()
     target_count = len(links)
+    numeric_names = bool(names) and all(re.fullmatch(r"\d+", name) for name in names)
+    next_number = max((int(name) for name in names), default=0) + 1 if numeric_names else 0
     for idx in range(target_count):
         link = links[idx % len(links)]
         if names:
             base = names[idx % len(names)]
             if idx < len(names):
                 candidate = base
+            elif numeric_names:
+                candidate = str(next_number + idx - len(names))
             else:
                 alias = link_alias(link)
                 candidate = f"{base}@{alias}" if alias else f"{base}-{idx + 1}"
@@ -1041,9 +1151,11 @@ def proxy_group_expansions(base_names, rendered_names):
     expansions = {name: [] for name in base_names}
     if not base_names:
         return expansions
-    for idx, name in enumerate(rendered_names):
-        base = base_names[idx % len(base_names)]
-        expansions.setdefault(base, []).append(name)
+    for idx, name in enumerate(rendered_names[:len(base_names)]):
+        expansions[base_names[idx]].append(name)
+    extra_names = rendered_names[len(base_names):]
+    if extra_names:
+        expansions[base_names[-1]].extend(extra_names)
     return expansions
 
 
@@ -1092,7 +1204,7 @@ def expand_proxy_group_references(config_text, expansions):
                         if expanded in group_seen:
                             continue
                         group_seen.add(expanded)
-                        out.append(prefix + expanded)
+                        out.append(prefix + q(expanded))
                     continue
 
         out.append(line)
