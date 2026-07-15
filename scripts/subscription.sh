@@ -273,7 +273,7 @@ write_web_ui() {
       const params = new URLSearchParams({token});
       const source = urlEl.value.trim();
       const config = configEl.value.trim();
-      if (source && source !== localSub && source !== rawSub) params.set("source", source);
+      if (source) params.set("source", source);
       if (config && config !== defaultConfig) params.set("config", config);
       return location.origin + "/subconfig-api/render/clash?" + params.toString();
     }
