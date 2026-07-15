@@ -329,7 +329,7 @@ write_web_ui() {
     }
     async function openResult() {
       const targetWindow = window.open("about:blank", "_blank");
-      const result = await build();
+      const result = resultEl.dataset.url || await build();
       if (result && targetWindow) targetWindow.location.href = result;
       else if (targetWindow) targetWindow.close();
     }
