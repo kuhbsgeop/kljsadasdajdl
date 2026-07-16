@@ -5,6 +5,8 @@ import os
 import secrets
 import socket
 import tempfile
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -32,9 +34,12 @@ SERVER_ALIASES = os.environ.get("SERVER_ALIASES", "")
 EXPAND_ALIASES = os.environ.get("SUBSCRIPTION_EXPAND_ALIASES", "1") == "1"
 ALL_NODES_SUB_ID = os.environ.get("ALL_NODES_SUB_ID", "")
 DOMAIN_NODE_MODE = os.environ.get("DOMAIN_NODE_MODE", "1") in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
+PUBLIC_LINK_REFRESH_INTERVAL = max(15, int(os.environ.get("PUBLIC_LINK_REFRESH_INTERVAL", "60")))
 SUPPORTED_LINK_SCHEMES = ("vless", "vmess", "trojan", "ss", "hysteria2")
 LOCAL_CONFIG_CACHE = {"mtime_ns": None, "size": None, "text": None}
 SHORT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,32}$")
+PUBLIC_REFRESH_LOCK = threading.Lock()
+PUBLIC_REFRESH_STATE = {"at": 0.0, "count": 0}
 
 
 def validate_remote_url(value):
@@ -334,6 +339,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/refresh-links":
             self.refresh_links()
             return
+        if path == "/refresh-public-links":
+            self.refresh_public_links()
+            return
         if path == "/forwards":
             self.save_forward()
             return
@@ -457,6 +465,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(500, {"success": False, "error": str(exc)})
             return
         self.send_json(200, {"success": True, "count": len(links), "links": links})
+
+    def refresh_public_links(self):
+        try:
+            count, cached = refresh_public_subscription_links()
+        except Exception as exc:
+            self.send_json(500, {"success": False, "error": str(exc)})
+            return
+        self.send_json(200, {"success": True, "count": count, "cached": cached})
 
     def render_clash(self, parsed):
         params = parse_qs(parsed.query)
@@ -876,9 +892,17 @@ def expand_links_for_aliases(links):
 
 def align_links_to_aliases(links):
     host_aliases = aliases()
-    if not DOMAIN_NODE_MODE or not host_aliases or len(links) != len(host_aliases):
+    if (
+        not DOMAIN_NODE_MODE
+        or not host_aliases
+        or not links
+        or len(links) % len(host_aliases) != 0
+    ):
         return None
-    return unique_links(replace_link_host(link, host_aliases[idx]) for idx, link in enumerate(links))
+    return unique_links(
+        replace_link_host(link, host_aliases[idx % len(host_aliases)])
+        for idx, link in enumerate(links)
+    )
 
 
 def write_subscription_links(links):
@@ -896,6 +920,17 @@ def refresh_subscription_links():
     links = align_links_to_aliases(links) or expand_links_for_aliases(links)
     write_subscription_links(links)
     return links
+
+
+def refresh_public_subscription_links():
+    now = time.monotonic()
+    with PUBLIC_REFRESH_LOCK:
+        elapsed = now - PUBLIC_REFRESH_STATE["at"]
+        if PUBLIC_REFRESH_STATE["at"] and elapsed < PUBLIC_LINK_REFRESH_INTERVAL:
+            return PUBLIC_REFRESH_STATE["count"], True
+        links = refresh_subscription_links()
+        PUBLIC_REFRESH_STATE.update(at=time.monotonic(), count=len(links))
+        return len(links), False
 
 
 def q(value):

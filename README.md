@@ -27,6 +27,15 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-cl
   | sudo env PUBLIC_HTTP_PANEL=1 bash
 ```
 
+## 已安装服务器一键更新
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-click.sh \
+  | sudo bash -s -- update
+```
+
+更新会同步脚本和订阅页面、保留已有 `.env`、数据库与 3.5.yaml 规则，然后滚动更新服务。
+
 ## 交互安装
 
 ```bash

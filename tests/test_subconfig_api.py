@@ -57,6 +57,31 @@ class ShortLinkTests(unittest.TestCase):
             api.short_link_path("../../secret")
 
 
+class DomainNodeTests(unittest.TestCase):
+    def test_domain_node_groups_align_without_cartesian_expansion(self):
+        links = [
+            VLESS.replace("example.com", "source.example", 1) + str(index)
+            for index in range(4)
+        ]
+        aliases = "a.example,b.example"
+        with mock.patch.object(api, "DOMAIN_NODE_MODE", True), mock.patch.object(
+            api, "SERVER_ALIASES", aliases
+        ):
+            aligned = api.align_links_to_aliases(links)
+        self.assertEqual(len(aligned), 4)
+        self.assertEqual([api.urlparse(link).hostname for link in aligned], [
+            "a.example", "b.example", "a.example", "b.example"
+        ])
+
+    def test_single_link_still_expands_to_each_domain(self):
+        with mock.patch.object(api, "DOMAIN_NODE_MODE", True), mock.patch.object(
+            api, "SERVER_ALIASES", "a.example,b.example"
+        ):
+            self.assertIsNone(api.align_links_to_aliases([VLESS]))
+            expanded = api.expand_links_for_aliases([VLESS])
+        self.assertEqual(len(expanded), 2)
+
+
 class NodeParserTests(unittest.TestCase):
     def test_vless_reality_is_rendered_for_clash(self):
         node = api.parse_node(VLESS)

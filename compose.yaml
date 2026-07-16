@@ -53,6 +53,7 @@ services:
       SUBSCRIPTION_EXPAND_ALIASES: ${SUBSCRIPTION_EXPAND_ALIASES:-1}
       ALL_NODES_SUB_ID: ${ALL_NODES_SUB_ID:-}
       DOMAIN_NODE_MODE: ${DOMAIN_NODE_MODE:-1}
+      PUBLIC_LINK_REFRESH_INTERVAL: ${PUBLIC_LINK_REFRESH_INTERVAL:-60}
     volumes:
       - ./scripts/subconfig-api.py:/app/subconfig-api.py:ro
       - ./site/sub/config:/config

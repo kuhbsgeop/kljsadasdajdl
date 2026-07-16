@@ -23,6 +23,7 @@ configure_defaults() {
   export ENABLE_SUB_CONFIG_EDITOR="${ENABLE_SUB_CONFIG_EDITOR:-1}"
   export ENABLE_RUSTDESK="${ENABLE_RUSTDESK:-1}"
   export SUBSCRIPTION_EXPAND_ALIASES="${SUBSCRIPTION_EXPAND_ALIASES:-1}"
+  export PUBLIC_LINK_REFRESH_INTERVAL="${PUBLIC_LINK_REFRESH_INTERVAL:-60}"
   export XUI_BUILTIN_SUB_ENABLE="${XUI_BUILTIN_SUB_ENABLE:-1}"
   export XUI_BUILTIN_ALL_NODES="${XUI_BUILTIN_ALL_NODES:-1}"
   export ENABLE_PROTOCOL_GUARD="${ENABLE_PROTOCOL_GUARD:-1}"
@@ -81,10 +82,32 @@ run_install() {
   exec bash "$tmp"
 }
 
+run_update() {
+  local script_dir local_update tmp
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local_update="${script_dir}/scripts/safe-update.sh"
+  if [ -f "$local_update" ]; then
+    log "Running local safe-update.sh."
+    exec bash "$local_update"
+  fi
+
+  log "Downloading safe-update.sh from ${REPO_RAW_BASE}."
+  tmp="$(mktemp)"
+  if ! curl -fsSL "${REPO_RAW_BASE}/scripts/safe-update.sh" -o "$tmp"; then
+    rm -f "$tmp"
+    die "Could not download safe-update.sh."
+  fi
+  exec bash "$tmp"
+}
+
 main() {
   need_root
   configure_defaults
-  run_install
+  case "${1:-install}" in
+    install) run_install ;;
+    update|safe-update) run_update ;;
+    *) die "Usage: one-click.sh [install|update]" ;;
+  esac
 }
 
 main "$@"
