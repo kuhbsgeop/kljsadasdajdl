@@ -586,7 +586,7 @@ write_vless_reality_per_domain() {
           })),
           decryption: "none",
           encryption: "none",
-          fallbacks: []
+          fallbacks: (if $port == 443 then [{dest: "127.0.0.1:8443"}] else [] end)
         },
         streamSettings: {
           network: "tcp",
@@ -655,7 +655,9 @@ ensure_self_signed_cert() {
 }
 
 write_vless_reality() {
-  if domain_port_mode_active; then
+  # Public 443 can only host one Reality listener. Keep all domain clients in
+  # that listener; other protocols retain their existing per-domain ports.
+  if domain_port_mode_active && [ "${REALITY_PORT:-443}" != "443" ]; then
     write_vless_reality_per_domain
     return
   fi
@@ -711,7 +713,7 @@ write_vless_reality() {
         })),
         decryption: "none",
         encryption: "none",
-        fallbacks: []
+        fallbacks: (if $port == 443 then [{dest: "127.0.0.1:8443"}] else [] end)
       },
       streamSettings: {
         network: "tcp",

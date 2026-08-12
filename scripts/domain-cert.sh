@@ -303,7 +303,7 @@ write_caddyfile() {
 	redir https://{host}{uri} 308
 }
 
-:443 {
+:127.0.0.1:${CADDY_FALLBACK_PORT:-8443} {
 	tls /cert/domains/fullchain.pem /cert/domains/privkey.pem
 	@panelRoot path /${panel_path}
 	redir @panelRoot /${panel_path}/ 308
@@ -746,10 +746,12 @@ main() {
   if [ "${USE_DOMAIN_FOR_LINKS:-1}" = "1" ]; then
     SERVER_ADDR="$primary"
   fi
-  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ "${REALITY_PORT:-443}" = "443" ]; then
-    log "HTTPS site needs 443, moving VLESS Reality to 8443."
-    set_env_var REALITY_PORT "8443"
-    REALITY_PORT="8443"
+  # Reality intentionally owns public 443. Caddy is bound to the private
+  # fallback port and Xray forwards ordinary HTTPS to it.
+  set_env_var REALITY_PORT "443"
+  REALITY_PORT="443"
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    set_env_var CADDY_FALLBACK_PORT "8443"
   fi
   set_env_var DOMAIN_PORT_MODE "${DOMAIN_PORT_MODE:-1}"
   set_env_var DOMAIN_PORT_STEP "${DOMAIN_PORT_STEP:-1}"
