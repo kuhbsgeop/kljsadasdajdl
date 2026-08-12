@@ -38,6 +38,7 @@ PUBLIC_LINK_REFRESH_INTERVAL = max(15, int(os.environ.get("PUBLIC_LINK_REFRESH_I
 SUPPORTED_LINK_SCHEMES = ("vless", "vmess", "trojan", "ss", "hysteria2")
 LOCAL_CONFIG_CACHE = {"mtime_ns": None, "size": None, "text": None}
 SHORT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,32}$")
+MANAGED_SOURCE = "__xui_managed__"
 PUBLIC_REFRESH_LOCK = threading.Lock()
 PUBLIC_REFRESH_STATE = {"at": 0.0, "count": 0}
 
@@ -129,6 +130,16 @@ def extract_subscription_links(value):
 
 def load_source_links(source):
     source = (source or "").strip()
+    if source == MANAGED_SOURCE:
+        try:
+            refresh_public_subscription_links()
+        except Exception:
+            # Keep serving the last known good list during a transient panel/API failure.
+            pass
+        links = read_subscription_links()
+        if not links:
+            raise ValueError("No enabled server nodes were found.")
+        return links
     if not source:
         return read_subscription_links()
 
@@ -158,9 +169,11 @@ def short_link_path(short_id):
     return SHORT_LINK_DIR / f"{short_id}.json"
 
 
-def save_short_link(source, config_source=""):
+def save_short_link(source, config_source="", managed=False):
     source = (source or "").strip()
     config_source = (config_source or "").strip()
+    if managed:
+        source = MANAGED_SOURCE
     if not source:
         raise ValueError("Paste at least one node link.")
     links = load_source_links(source)
@@ -169,7 +182,7 @@ def save_short_link(source, config_source=""):
 
     SHORT_LINK_DIR.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
-        {"source": source, "config": config_source},
+        {"source": source, "config": config_source, "managed": managed},
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -499,7 +512,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             payload = self.read_json_body()
-            short_id, count = save_short_link(payload.get("source", ""), payload.get("config", ""))
+            short_id, count = save_short_link(
+                payload.get("source", ""),
+                payload.get("config", ""),
+                managed=bool(payload.get("managed", False)),
+            )
         except Exception as exc:
             self.send_json(400, {"success": False, "error": str(exc)})
             return
@@ -744,29 +761,17 @@ def restart_xray_service():
 
 
 def fetch_xui_links():
-    links = []
-    if ALL_NODES_SUB_ID:
-        try:
-            links = fetch_xui_links_for_sub_id(ALL_NODES_SUB_ID)
-        except Exception:
-            links = []
-        if links:
-            return unique_links(links)
-
-    try:
-        data = xui_json("/panel/api/inbounds/allLinks")
-        if data.get("success") and isinstance(data.get("obj"), list):
-            links.extend(str(v) for v in data["obj"] if isinstance(v, str))
-    except Exception:
-        links = []
-    if links:
-        return unique_links(links)
-
     inbounds = xui_json("/panel/api/inbounds/list")
     emails = []
     for inbound in inbounds.get("obj", []) or []:
-        settings = inbound.get("settings") or {}
+        if inbound.get("enable", True) is False:
+            continue
+        settings = parse_settings(inbound.get("settings"))
         for client in settings.get("clients") or []:
+            if not isinstance(client, dict) or client.get("enable", True) is False:
+                continue
+            if ALL_NODES_SUB_ID and client.get("subId") != ALL_NODES_SUB_ID:
+                continue
             email = client.get("email")
             if email and email not in emails:
                 emails.append(email)
@@ -796,6 +801,8 @@ def fetch_xui_links_for_sub_id(sub_id):
         settings = parse_settings(inbound.get("settings"))
         for client in settings.get("clients") or []:
             if not isinstance(client, dict):
+                continue
+            if inbound.get("enable", True) is False or client.get("enable", True) is False:
                 continue
             if client.get("subId") != sub_id:
                 continue
@@ -917,7 +924,13 @@ def write_subscription_links(links):
 
 def refresh_subscription_links():
     links = fetch_xui_links()
-    links = align_links_to_aliases(links) or expand_links_for_aliases(links)
+    # A single managed inbound can be expanded to configured aliases. Once the
+    # panel returns multiple inbounds, preserve those current links exactly;
+    # cartesian expansion would duplicate nodes and stale credentials.
+    if len(links) == 1:
+        links = expand_links_for_aliases(links)
+    elif len(links) == len(aliases()):
+        links = align_links_to_aliases(links) or links
     write_subscription_links(links)
     return links
 

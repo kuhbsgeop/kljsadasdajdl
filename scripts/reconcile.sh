@@ -65,11 +65,13 @@ docker exec "$XUI_CONTAINER" /app/x-ui setting \
 
 if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -n "${DOMAIN_NAMES:-}" ]; then
   log "Reconciling domains, HTTPS, Caddy, and built-in subscription proxy."
-  ./scripts/domain-cert.sh --auto || ok=0
+  # Routine reconcile must preserve managed UUIDs, REALITY keys, short IDs,
+  # and passwords. Explicit domain migrations can opt into one-time rebuilds.
+  RECREATE_MANAGED_INBOUNDS=0 RECREATE_ON_DOMAIN_UPDATE=0 ./scripts/domain-cert.sh --auto || ok=0
 fi
 
 log "Reconciling protocol presets."
-./scripts/apply-presets.sh || ok=0
+RECREATE_MANAGED_INBOUNDS=0 ./scripts/apply-presets.sh || ok=0
 
 log "Applying unsafe protocol guard."
 ./scripts/protocol-guard.sh || ok=0

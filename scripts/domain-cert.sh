@@ -755,7 +755,7 @@ main() {
   set_env_var DOMAIN_PORT_STEP "${DOMAIN_PORT_STEP:-1}"
   DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
   DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
-  if truthy "${RECREATE_ON_DOMAIN_UPDATE:-1}"; then
+  if truthy "${RECREATE_ON_DOMAIN_UPDATE:-0}"; then
     RECREATE_MANAGED_INBOUNDS=1
     export RECREATE_MANAGED_INBOUNDS
     log "Domain update will rebuild all managed domain inbounds."

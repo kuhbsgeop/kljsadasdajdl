@@ -56,6 +56,18 @@ class ShortLinkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid short link id"):
             api.short_link_path("../../secret")
 
+    def test_managed_short_link_uses_current_subscription(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(api, "SHORT_LINK_DIR", Path(tmp)), mock.patch.object(
+                api, "refresh_public_subscription_links"
+            ) as refresh, mock.patch.object(api, "read_subscription_links", return_value=[VLESS]):
+                short_id, count = api.save_short_link("", managed=True)
+                source, config = api.load_short_link(short_id)
+                self.assertEqual(count, 1)
+                self.assertEqual(source, api.MANAGED_SOURCE)
+                self.assertEqual(config, "")
+                refresh.assert_called_once()
+
 
 class DomainNodeTests(unittest.TestCase):
     def test_domain_node_groups_align_without_cartesian_expansion(self):

@@ -288,15 +288,22 @@ write_web_ui() {
     configEl.addEventListener("input", () => { resultEl.dataset.url = ""; });
     targetEl.addEventListener("change", () => { resultEl.dataset.url = ""; });
     async function buildClash35Link() {
-      const source = urlEl.value.trim() || localSub;
+      const customSource = urlEl.value.trim();
+      const source = customSource || localSub;
       const config = configEl.value.trim();
       if (!source) throw new Error("请先粘贴至少一条节点连接");
       const response = await fetch(location.origin + "/subconfig-api/shorten?token=" + encodeURIComponent(token), {
         method: "POST",
         headers: {"Content-Type": "application/json; charset=utf-8"},
-        body: JSON.stringify({source, config: config && config !== defaultConfig ? config : ""})
+        body: JSON.stringify({source, managed: !customSource, config: config && config !== defaultConfig ? config : ""})
       });
-      const data = await response.json();
+      const raw = await response.text();
+      let data;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_) {
+        throw new Error("服务器返回了空或无效响应");
+      }
       if (!response.ok || !data.success) throw new Error(data.error || response.statusText);
       return {url: location.origin + data.path, count: data.count};
     }
@@ -352,7 +359,7 @@ write_web_ui() {
         const response = await fetch(location.origin + "/subconfig-api/refresh-public-links", {method: "POST"});
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || response.statusText);
-        const result = await build();
+        const result = await buildClash35Link();
         document.getElementById("allLinksStatus").textContent =
           (data.cached ? "已使用最近同步" : "已同步") + " " + data.count + " 条当前节点。";
       } catch (error) {

@@ -705,7 +705,7 @@ apply_existing_env_overrides() {
       has_install_override ENABLE_SUBCONVERTER || set_env_var ENABLE_SUBCONVERTER "1"
       has_install_override SUBSCRIPTION_EXPAND_ALIASES || set_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
       has_install_override DOMAIN_NODE_MODE || set_env_var DOMAIN_NODE_MODE "1"
-      has_install_override RECREATE_ON_DOMAIN_UPDATE || set_env_var RECREATE_ON_DOMAIN_UPDATE "1"
+      has_install_override RECREATE_ON_DOMAIN_UPDATE || set_env_var RECREATE_ON_DOMAIN_UPDATE "0"
       has_install_override RECREATE_MANAGED_INBOUNDS || set_env_var RECREATE_MANAGED_INBOUNDS "1"
       has_install_override ENABLE_PROTOCOL_GUARD || set_env_var ENABLE_PROTOCOL_GUARD "1"
       has_install_override PROTOCOL_GUARD_ACTION || set_env_var PROTOCOL_GUARD_ACTION "disable"
@@ -729,7 +729,7 @@ apply_existing_env_overrides() {
   ensure_env_var DOMAIN_NODE_MODE "1"
   ensure_env_var DOMAIN_PORT_MODE "1"
   ensure_env_var DOMAIN_PORT_STEP "1"
-  ensure_env_var RECREATE_ON_DOMAIN_UPDATE "1"
+  ensure_env_var RECREATE_ON_DOMAIN_UPDATE "0"
   ensure_env_var XUI_BUILTIN_SUB_ENABLE "1"
   ensure_env_var XUI_BUILTIN_ALL_NODES "1"
 
@@ -921,7 +921,7 @@ DOMAIN_NODE_MODE=${DOMAIN_NODE_MODE:-1}
 DOMAIN_PORT_MODE=${DOMAIN_PORT_MODE:-1}
 DOMAIN_PORT_START=${DOMAIN_PORT_START:-}
 DOMAIN_PORT_STEP=${DOMAIN_PORT_STEP:-1}
-RECREATE_ON_DOMAIN_UPDATE=${RECREATE_ON_DOMAIN_UPDATE:-1}
+RECREATE_ON_DOMAIN_UPDATE=${RECREATE_ON_DOMAIN_UPDATE:-0}
 RECREATE_MANAGED_INBOUNDS=${RECREATE_MANAGED_INBOUNDS:-0}
 XUI_API_BASE=${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT:-2053}/${base_path}}
 XUI_API_TOKEN=${XUI_API_TOKEN:-}
