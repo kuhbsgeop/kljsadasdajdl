@@ -299,14 +299,6 @@ write_caddyfile() {
   xui_sub_block="$(xui_builtin_sub_caddy_block)"
   if [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     cat > caddy/Caddyfile <<EOF
-{
-	auto_https off
-	https_port 8443
-	servers {
-		protocols h1 h2
-	}
-}
-
 :80 {
 	redir https://{host}{uri} 308
 }
