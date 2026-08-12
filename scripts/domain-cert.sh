@@ -301,6 +301,10 @@ write_caddyfile() {
     cat > caddy/Caddyfile <<EOF
 {
 	auto_https off
+	https_port 8443
+	servers {
+		protocols h1 h2
+	}
 }
 
 :80 {
