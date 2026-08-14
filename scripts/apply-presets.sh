@@ -9,7 +9,7 @@ cd "$ROOT_DIR"
 OVERRIDE_KEYS=(
   XUI_CONTAINER PANEL_PORT WEB_BASE_PATH SERVER_ADDR DOMAIN_NAMES SERVER_ALIASES DOMAIN_NODE_MODE
   DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
-  REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
+  REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X REALITY_MIN_CLIENT_VERSION
   ENABLE_HYSTERIA ENABLE_TROJAN ENABLE_SHADOWSOCKS ALLOW_SELF_SIGNED_TLS
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
   ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
@@ -50,6 +50,7 @@ DOMAIN_NODE_MODE="${DOMAIN_NODE_MODE:-1}"
 DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
 DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
 DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
+REALITY_MIN_CLIENT_VERSION="${REALITY_MIN_CLIENT_VERSION:-1.8.2}"
 ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
 ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
 ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
@@ -521,6 +522,79 @@ update_trojan_domain_clients() {
   api_post_json "/panel/api/inbounds/update/${id}" "$file" | jq .
 }
 
+sync_reality_client_compatibility() {
+  local resp updates payload id file remaining
+  [[ "$REALITY_MIN_CLIENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "REALITY_MIN_CLIENT_VERSION must use x.y.z format: ${REALITY_MIN_CLIENT_VERSION}" >&2
+    return 1
+  }
+
+  resp="$(api_get "/panel/api/inbounds/list")"
+  printf '%s\n' "$resp" > runtime/inbounds-before-reality-compat-sync.json
+  updates="$(
+    printf '%s' "$resp" | jq -c --arg minClientVer "$REALITY_MIN_CLIENT_VERSION" '
+      def obj:
+        if type == "string" then (fromjson? // {}) else (. // {}) end;
+      .obj[]? as $inbound
+      | ($inbound.streamSettings | obj) as $stream
+      | select(($inbound.protocol // "") == "vless")
+      | select(($inbound.remark // "") | startswith("auto-vless-reality-"))
+      | select(($stream.security // "") == "reality")
+      | select(($stream.realitySettings.minClientVer // "") != $minClientVer)
+      | {
+          id: $inbound.id,
+          enable: ($inbound.enable // true),
+          remark: ($inbound.remark // ""),
+          listen: ($inbound.listen // ""),
+          port: ($inbound.port // 0),
+          shareAddr: ($inbound.shareAddr // ""),
+          shareAddrStrategy: ($inbound.shareAddrStrategy // "listen"),
+          protocol: ($inbound.protocol // "vless"),
+          expiryTime: ($inbound.expiryTime // 0),
+          total: ($inbound.total // 0),
+          trafficReset: ($inbound.trafficReset // "never"),
+          settings: ($inbound.settings | obj),
+          streamSettings: ($stream | .realitySettings.minClientVer = $minClientVer),
+          sniffing: ($inbound.sniffing | obj)
+        }
+    '
+  )"
+
+  if [ -n "$updates" ]; then
+    while IFS= read -r payload; do
+      [ -n "$payload" ] || continue
+      id="$(printf '%s' "$payload" | jq -r '.id // empty')"
+      [ -n "$id" ] || continue
+      file="runtime/reality-client-compat-${id}.json"
+      printf '%s\n' "$payload" > "$file"
+      echo "Setting Reality minClientVer=${REALITY_MIN_CLIENT_VERSION} for managed inbound ${id}"
+      resp="$(api_post_json "/panel/api/inbounds/update/${id}" "$file")"
+      printf '%s\n' "$resp" | jq .
+      printf '%s\n' "$resp" | jq -e '.success == true' >/dev/null
+    done <<< "$updates"
+  fi
+
+  remaining="$(
+    api_get "/panel/api/inbounds/list" | jq -r --arg minClientVer "$REALITY_MIN_CLIENT_VERSION" '
+      def obj:
+        if type == "string" then (fromjson? // {}) else (. // {}) end;
+      [
+        .obj[]?
+        | select((.protocol // "") == "vless")
+        | select((.remark // "") | startswith("auto-vless-reality-"))
+        | (.streamSettings | obj) as $stream
+        | select(($stream.security // "") == "reality")
+        | select(($stream.realitySettings.minClientVer // "") != $minClientVer)
+      ]
+      | length
+    '
+  )"
+  [ "$remaining" = "0" ] || {
+    echo "Reality compatibility update incomplete: ${remaining} managed inbound(s) still differ." >&2
+    return 1
+  }
+}
+
 write_vless_reality_per_domain() {
   local keypair private_key public_key short_id server_names_json sni clients_json spec
   local domain port remark file client_json safe base_port
@@ -559,6 +633,7 @@ write_vless_reality_per_domain() {
       --arg publicKey "$public_key" \
       --arg shortId "$short_id" \
       --arg spiderX "${REALITY_SPIDER_X:-/}" \
+      --arg minClientVer "$REALITY_MIN_CLIENT_VERSION" \
       '{
         enable: true,
         remark: $remark,
@@ -598,7 +673,7 @@ write_vless_reality_per_domain() {
             target: $target,
             serverNames: $serverNames,
             privateKey: $privateKey,
-            minClientVer: "",
+            minClientVer: $minClientVer,
             maxClientVer: "",
             maxTimediff: 0,
             shortIds: [$shortId],
@@ -684,6 +759,7 @@ write_vless_reality() {
     --arg publicKey "$public_key" \
     --arg shortId "$short_id" \
     --arg spiderX "${REALITY_SPIDER_X:-/}" \
+    --arg minClientVer "$REALITY_MIN_CLIENT_VERSION" \
     '{
       enable: true,
       remark: $remark,
@@ -723,7 +799,7 @@ write_vless_reality() {
           target: $target,
           serverNames: $serverNames,
           privateKey: $privateKey,
-          minClientVer: "",
+          minClientVer: $minClientVer,
           maxClientVer: "",
           maxTimediff: 0,
           shortIds: [$shortId],
@@ -1637,6 +1713,7 @@ write_panel_links() {
 : > runtime/client-links.txt
 wait_api
 write_vless_reality
+sync_reality_client_compatibility
 write_hysteria2_optional
 write_trojan_optional
 write_shadowsocks_optional

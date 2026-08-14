@@ -60,6 +60,12 @@ sudo ./scripts/manage.sh amazon-global
 
 订阅 URL 和敏感源节点保存在服务器本机的 `runtime/amazon-global.txt`，该文件权限为 600；随机订阅 token 保存在 `.env`。
 
+## Reality 与 Clash/Mihomo 兼容
+
+一键安装默认写入 `REALITY_MIN_CLIENT_VERSION=1.8.2`。这是为了兼容 Clash/Mihomo 的 Reality ClientHello；新版 Xray 服务端在该值留空时会采用更高的默认最低版本，表现为端口和测速正常，但 VLESS Reality 握手失败、流量一直为 0。
+
+新安装会直接使用兼容参数；安全更新和 `./scripts/manage.sh apply-presets` 会无损修正已有的 `auto-vless-reality-*` 入站，只更新 `minClientVer`，保留 UUID、Reality 密钥、Short ID、端口和现有订阅链接。
+
 ## 交互安装
 
 ```bash

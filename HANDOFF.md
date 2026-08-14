@@ -22,6 +22,12 @@
 - DNS uses Fake-IP with `respect-rules: true`; IPv6 is disabled; the Android mixed TUN stack uses MTU 1400 and excludes the proxy endpoint IP from the TUN route.
 - Reconcile and safe update preserve and refresh this subscription whenever `ENABLE_AMAZON_GLOBAL=1`.
 
+## Reality client compatibility
+
+- Keep `REALITY_MIN_CLIENT_VERSION=1.8.2` unless every client is known to use a recent Xray-compatible Reality ClientHello. Xray 26.7.11 and newer otherwise default to a minimum version that current Clash/Mihomo clients can fail.
+- `scripts/apply-presets.sh` writes this value for new Reality inbounds and updates only `streamSettings.realitySettings.minClientVer` on existing managed `auto-vless-reality-*` inbounds. It preserves client UUIDs, Reality keys, short IDs, ports, and subscription URLs.
+- Safe update invokes reconcile, so existing deployments receive this compatibility repair automatically after updating.
+
 ## Sensitive handoff records
 
 Do not commit credentials. On each deployment host, keep the actual panel account, subscription token, Amazon global token/source VLESS link, rules-editor token, API token, and backup locations in `/opt/3xui-selfhost-kit/runtime/install-summary.txt`, `/opt/3xui-selfhost-kit/runtime/amazon-global.txt`, and `/opt/3xui-selfhost-kit/.env` (owner-readable records must remain mode 600). Update those local records when credentials or endpoints change.
