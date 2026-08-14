@@ -21,8 +21,12 @@ jobs:
           bash -n scripts/subscription.sh
           bash -n scripts/start-services.sh
           bash -n scripts/open-ports.sh
+          bash -n scripts/amazon-global.sh
           bash -n scripts/rustdesk.sh
           bash -n scripts/protocol-guard.sh
           bash -n scripts/menu.sh
           python3 -m py_compile scripts/subconfig-api.py
+          python3 -m py_compile scripts/amazon-global.py
+          ./scripts/amazon-global.sh --dry-run > /tmp/amazon-global.yaml
+          python3 -c 'import yaml; c=yaml.safe_load(open("/tmp/amazon-global.yaml")); assert c["rules"][-1].startswith("MATCH,")'
           python3 -m unittest discover -s tests -v

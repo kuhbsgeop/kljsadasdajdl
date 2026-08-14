@@ -7,6 +7,8 @@ cd "$ROOT_DIR"
 if [ -f .env ]; then
   OVERRIDE_KEYS=(
     XUI_CONTAINER PANEL_PORT WEB_BASE_PATH SERVER_ADDR
+    ENABLE_AMAZON_GLOBAL AMAZON_GLOBAL_TOKEN AMAZON_GLOBAL_NODE_NAME AMAZON_GLOBAL_GROUP_NAME
+    AMAZON_GLOBAL_TUN_MTU AMAZON_GLOBAL_PUBLIC_ORIGIN AMAZON_GLOBAL_SOURCE_LINK
     ENABLE_ADSPOWER_PROXY ADSPOWER_PROXY_REMARK ADSPOWER_PROXY_LISTEN ADSPOWER_PROXY_PORT
     ADSPOWER_PROXY_USER ADSPOWER_PROXY_PASS ADSPOWER_PROXY_UDP
   )
@@ -63,6 +65,7 @@ Commands:
   network-check  Check A/AAAA records, IPv4/IPv6, and local listeners
   adspower-proxy Add/update AdsPower fingerprint browser Socks5 proxy
   open-ports     Batch open firewall ports with ufw/firewalld/iptables
+  amazon-global  Create/refresh the Amazon residential-IP forced-global subscription
   rustdesk       Install/manage RustDesk Server OSS (hbbs/hbbr)
   protocol-guard Disable or delete unsafe inbound protocols
   forward        Add/update a dokodemo-door/tunnel port forward
@@ -74,6 +77,7 @@ Open ports examples:
   ./scripts/manage.sh open-ports -p tcp,udp 10000,10001,10010-10020
   ./scripts/manage.sh rustdesk install
   ./scripts/manage.sh rustdesk status
+  ./scripts/manage.sh amazon-global
 
 AdsPower examples:
   ./scripts/manage.sh adspower-proxy
@@ -384,6 +388,7 @@ case "$cmd" in
       echo "  runtime/client-links.txt"
       echo "  runtime/panel-all-links.txt"
       echo "  runtime/adspower-proxy.txt"
+      echo "  runtime/amazon-global.txt"
       echo
     fi
     if [ -f runtime/client-links.txt ]; then
@@ -400,6 +405,10 @@ case "$cmd" in
     if [ -s runtime/adspower-proxy.txt ]; then
       echo
       cat runtime/adspower-proxy.txt
+    fi
+    if [ -s runtime/amazon-global.txt ]; then
+      echo
+      cat runtime/amazon-global.txt
     fi
     ;;
   token)
@@ -431,6 +440,10 @@ case "$cmd" in
   open-ports|ports|firewall)
     shift
     ./scripts/open-ports.sh "$@"
+    ;;
+  amazon-global|amazon|amazon-node)
+    shift
+    ./scripts/amazon-global.sh "${1:-install}"
     ;;
   rustdesk|rd)
     shift

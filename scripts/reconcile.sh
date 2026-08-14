@@ -79,6 +79,11 @@ log "Applying unsafe protocol guard."
 log "Refreshing subscription converter and editable 3.5.yaml UI."
 ./scripts/subscription.sh || ok=0
 
+if [ "${ENABLE_AMAZON_GLOBAL:-0}" = "1" ]; then
+  log "Refreshing the Amazon residential-IP forced-global subscription."
+  ./scripts/amazon-global.sh refresh || ok=0
+fi
+
 if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
   log "Reconciling 3X-UI built-in subscription HTTPS URI."
   ./scripts/xui-builtin-subscription.sh || ok=0

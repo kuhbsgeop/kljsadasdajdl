@@ -36,6 +36,30 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-cl
 
 更新会同步脚本和订阅页面、保留已有 `.env`、数据库与 3.5.yaml 规则，然后滚动更新服务。
 
+## 亚马逊住宅 IP 全局节点
+
+新服务器和已经安装过本项目的服务器都使用同一条命令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-click.sh \
+  | sudo bash -s -- amazon-global
+```
+
+新服务器会先完成 3x-ui 安装、自动创建 VLESS Reality 节点，再生成独立的安卓 Clash/Mihomo YAML 订阅；已安装服务器会直接创建或刷新该订阅。
+
+这份订阅不依赖 Clash 内置的 `GLOBAL` 分组。Amazon、Seller Central、AWS、Prime Video 等域名会显式走节点，最后一条 `MATCH` 规则会让其他网页、应用和服务也全部走同一个节点。DNS 启用 Fake-IP 和规则跟随，IPv6 默认关闭，Android TUN MTU 默认是 1400。
+
+客户端导入安装结果打印的 URL 后必须保持“规则 / Rule”模式，不要切换 Clash 自带的 Global 模式。
+
+已安装服务器也可以直接运行：
+
+```bash
+cd /opt/3xui-selfhost-kit
+sudo ./scripts/manage.sh amazon-global
+```
+
+订阅 URL 和敏感源节点保存在服务器本机的 `runtime/amazon-global.txt`，该文件权限为 600；随机订阅 token 保存在 `.env`。
+
 ## 交互安装
 
 ```bash

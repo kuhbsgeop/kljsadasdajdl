@@ -306,6 +306,11 @@ write_runtime_summary() {
     ${ROOT_DIR}/runtime/xui-builtin-sub-links.txt
   JSON URI: $(web_origin)${XUI_BUILTIN_JSON_PATH:-/xui-json/}
   Clash URI: $(web_origin)${XUI_BUILTIN_CLASH_PATH:-/xui-clash/}
+
+11) Amazon residential-IP forced-global node
+  Enabled: ${ENABLE_AMAZON_GLOBAL:-0}
+  Android mode: Rule
+  Handoff record: ${ROOT_DIR}/runtime/amazon-global.txt
 EOF
   chmod 600 runtime/install-summary.txt
 }
@@ -338,6 +343,7 @@ show_header() {
   echo "${green}20. 批量放开防火墙端口【ufw/firewalld/iptables】${plain}"
   echo "${green}21. 创建/刷新 AdsPower 指纹浏览器代理【mixed/Socks5】${plain}"
   echo "${green}22. 安装/查看 RustDesk ID与中继服务器【hbbs/hbbr】${plain}"
+  echo "${green}23. 创建/刷新亚马逊住宅IP全局节点【所有服务强制走节点】${plain}"
   line
   echo "${green} 0. 退出脚本${plain}"
   warn_line
@@ -384,6 +390,12 @@ show_status() {
   echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
   echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
   echo "3X-UI内置订阅前缀: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
+  if [ -s runtime/amazon-global.txt ]; then
+    echo "亚马逊住宅IP全局订阅:"
+    awk '/^Subscription URL:/{show=1; next} show && /^[[:space:]]+https?:/{print "  " $0; exit}' runtime/amazon-global.txt
+  else
+    echo "亚马逊住宅IP全局订阅: ${yellow}未生成，运行菜单 23 创建。${plain}"
+  fi
   echo "说明: ${yellow}内置订阅必须追加 subId；DOMAIN_NODE_MODE=1 时默认域名节点共享 ALL_NODES_SUB_ID，all-nodes 链接按 DOMAIN_NAMES 生成节点。直接打开前缀会跳转到 /sub/。${plain}"
   if [ -s runtime/xui-builtin-sub-links.txt ]; then
     echo "3X-UI内置订阅客户端链接:"
@@ -693,6 +705,7 @@ show_help() {
   sudo x-ui forward
   ./scripts/manage.sh forward 27677 127.0.0.1 9999 tcp 0.0.0.0
   ./scripts/manage.sh protocol-guard
+  ./scripts/manage.sh amazon-global
 
 安全建议:
   1. 默认交互式安全模式会把面板绑定 127.0.0.1；公网 IP 直连请把监听 IP 改成 0.0.0.0。
@@ -715,7 +728,7 @@ main_loop() {
   while true; do
     refresh_env
     show_menu
-    read -r -p "请输入选项 [0-22]: " choice </dev/tty || choice="0"
+    read -r -p "请输入选项 [0-23]: " choice </dev/tty || choice="0"
     case "$choice" in
       1) install_or_start; pause ;;
       2) uninstall_xui; pause ;;
@@ -739,6 +752,7 @@ main_loop() {
       20) ./scripts/manage.sh open-ports; pause ;;
       21) ./scripts/manage.sh adspower-proxy; pause ;;
       22) ./scripts/manage.sh rustdesk install; pause ;;
+      23) ./scripts/manage.sh amazon-global; show_links; pause ;;
       0) exit 0 ;;
       *) echo "${yellow}无效选项。${plain}"; pause ;;
     esac

@@ -100,13 +100,47 @@ run_update() {
   exec bash "$tmp"
 }
 
+run_amazon_global() {
+  local script_dir installed_dir target component tmp
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  installed_dir="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
+
+  for target in "$script_dir" "$installed_dir"; do
+    if [ -f "${target}/.env" ]; then
+      mkdir -p "${target}/scripts"
+      log "Refreshing the Amazon residential-IP global command in ${target}."
+      for component in amazon-global.sh amazon-global.py; do
+        tmp="$(mktemp)"
+        if ! curl -fsSL "${REPO_RAW_BASE}/scripts/${component}" -o "$tmp"; then
+          rm -f "$tmp"
+          die "Could not download scripts/${component}."
+        fi
+        chmod +x "$tmp"
+        mv "$tmp" "${target}/scripts/${component}"
+      done
+      log "Creating or refreshing the Amazon residential-IP global subscription."
+      cd "$target"
+      exec bash ./scripts/amazon-global.sh install
+    fi
+  done
+
+  log "No existing installation found; installing the dedicated Amazon global node."
+  export ENABLE_AMAZON_GLOBAL=1
+  export ENABLE_RUSTDESK=0
+  export ENABLE_ADSPOWER_PROXY=0
+  export ENABLE_SHADOWSOCKS=0
+  export MENU_AFTER_INSTALL=0
+  run_install
+}
+
 main() {
   need_root
   configure_defaults
   case "${1:-install}" in
     install) run_install ;;
     update|safe-update) run_update ;;
-    *) die "Usage: one-click.sh [install|update]" ;;
+    amazon-global|amazon|amazon-node) run_amazon_global ;;
+    *) die "Usage: one-click.sh [install|update|amazon-global]" ;;
   esac
 }
 

@@ -58,6 +58,8 @@ sync_kit_files() {
     "scripts/mask-site.sh"
     "scripts/protocol-guard.sh"
     "scripts/open-ports.sh"
+    "scripts/amazon-global.sh"
+    "scripts/amazon-global.py"
     "scripts/rustdesk.sh"
     "scripts/network-check.sh"
     "scripts/reconcile.sh"

@@ -9,7 +9,8 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
   RECREATE_ON_DOMAIN_UPDATE RECREATE_MANAGED_INBOUNDS
   ENABLE_ACME ACME_EMAIL ACME_SERVER ACME_FALLBACK_SERVER REQUIRE_DOMAIN_ORIGIN PUBLIC_IPV4 PUBLIC_IPV6 STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
-  ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA
+  ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA ENABLE_AMAZON_GLOBAL
+  AMAZON_GLOBAL_TOKEN AMAZON_GLOBAL_NODE_NAME AMAZON_GLOBAL_GROUP_NAME AMAZON_GLOBAL_TUN_MTU AMAZON_GLOBAL_PUBLIC_ORIGIN
   REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X
   TLS_SERVER_NAME TLS_CERT_FILE TLS_KEY_FILE
   TROJAN_PORT SHADOWSOCKS_PORT HYSTERIA_PORT
@@ -258,6 +259,8 @@ download_project() {
     "scripts/mask-site.sh"
     "scripts/protocol-guard.sh"
     "scripts/open-ports.sh"
+    "scripts/amazon-global.sh"
+    "scripts/amazon-global.py"
     "scripts/rustdesk.sh"
     "scripts/network-check.sh"
     "scripts/reconcile.sh"
@@ -418,6 +421,16 @@ configure_subscription() {
   if ! (cd "$INSTALL_DIR" && ./scripts/subscription.sh); then
     log "Subscription converter setup did not fully complete. Retry later with: x-ui -> subscription menu"
   fi
+}
+
+configure_amazon_global() {
+  load_env
+  if [ "${ENABLE_AMAZON_GLOBAL:-0}" != "1" ]; then
+    return
+  fi
+  log "Creating the dedicated Amazon residential-IP forced-global subscription."
+  (cd "$INSTALL_DIR" && ./scripts/amazon-global.sh install)
+  load_env
 }
 
 configure_xui_builtin_subscription() {
@@ -748,6 +761,11 @@ apply_existing_env_overrides() {
   ensure_env_var REALITY_SERVER_NAMES "www.cloudflare.com,cloudflare.com"
   ensure_env_var REALITY_SPIDER_X "/"
   ensure_env_var ENABLE_PRESETS "1"
+  ensure_env_var ENABLE_AMAZON_GLOBAL "0"
+  ensure_env_var AMAZON_GLOBAL_TOKEN ""
+  ensure_env_var AMAZON_GLOBAL_NODE_NAME "Amazon住宅全局节点"
+  ensure_env_var AMAZON_GLOBAL_GROUP_NAME "Amazon住宅IP全局代理"
+  ensure_env_var AMAZON_GLOBAL_TUN_MTU "1400"
   ensure_env_var ENABLE_SHADOWSOCKS "1"
   ensure_env_var SHADOWSOCKS_PORT "8388"
   ensure_env_var TROJAN_PORT "9443"
@@ -848,6 +866,12 @@ REALITY_SERVER_NAMES=${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
 REALITY_SPIDER_X=${REALITY_SPIDER_X:-/}
 
 ENABLE_PRESETS=${ENABLE_PRESETS:-1}
+ENABLE_AMAZON_GLOBAL=${ENABLE_AMAZON_GLOBAL:-0}
+AMAZON_GLOBAL_TOKEN=${AMAZON_GLOBAL_TOKEN:-}
+AMAZON_GLOBAL_NODE_NAME=${AMAZON_GLOBAL_NODE_NAME:-Amazon住宅全局节点}
+AMAZON_GLOBAL_GROUP_NAME=${AMAZON_GLOBAL_GROUP_NAME:-Amazon住宅IP全局代理}
+AMAZON_GLOBAL_TUN_MTU=${AMAZON_GLOBAL_TUN_MTU:-1400}
+AMAZON_GLOBAL_PUBLIC_ORIGIN=${AMAZON_GLOBAL_PUBLIC_ORIGIN:-}
 ALL_NODES_SUB_ID=${all_nodes_sub_id}
 DEFAULT_SUB_ID=${default_sub_id}
 ENABLE_HYSTERIA=${ENABLE_HYSTERIA:-0}
@@ -1217,6 +1241,14 @@ write_install_summary() {
     ${INSTALL_DIR}/runtime/rustdesk-server.txt
   Manage:
     ${INSTALL_DIR}/scripts/manage.sh rustdesk status
+
+15) Amazon residential-IP forced-global node
+  Enabled: ${ENABLE_AMAZON_GLOBAL:-0}
+  Android mode: Rule
+  Subscription URL:
+    $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subscriptions/%s.yaml' "${SERVER_ADDR:-your-server}" "${AMAZON_GLOBAL_TOKEN:-not-generated}" || printf 'http://%s:%s/subscriptions/%s.yaml' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${AMAZON_GLOBAL_TOKEN:-not-generated}")
+  Local handoff record:
+    ${INSTALL_DIR}/runtime/amazon-global.txt
 EOF
   chmod 600 "$summary"
 }
@@ -1272,6 +1304,7 @@ main() {
   configure_protocol_guard
   configure_xui_builtin_subscription
   configure_subscription
+  configure_amazon_global
 
   write_install_summary
   print_install_summary
