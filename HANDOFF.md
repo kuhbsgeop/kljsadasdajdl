@@ -31,3 +31,11 @@
 ## Sensitive handoff records
 
 Do not commit credentials. On each deployment host, keep the actual panel account, subscription token, Amazon global token/source VLESS link, rules-editor token, API token, and backup locations in `/opt/3xui-selfhost-kit/runtime/install-summary.txt`, `/opt/3xui-selfhost-kit/runtime/amazon-global.txt`, and `/opt/3xui-selfhost-kit/.env` (owner-readable records must remain mode 600). Update those local records when credentials or endpoints change.
+
+## RustDesk 网页端交接
+
+- 原生客户端继续使用 `ID Server: 域名:21116`、`Relay Server: 域名:21117` 和服务器公钥；不要把网页端的 WSS 路径写进原生客户端。
+- `https://rustdesk.com/web/` 的 `ID Server` 只填写域名、不带端口，`API Server` 留空，并填写同一份服务器公钥。
+- HTTPS 站点必须提供 `wss://域名/ws/id` 与 `wss://域名/ws/relay`；Caddy 分别反向代理到本机 `21118` 和 `21119`。
+- 修改域名或重建 Caddy 配置后，运行 `./scripts/domain-cert.sh --auto`，再用 WebSocket Upgrade 请求确认两个路径均返回 `101 Switching Protocols`。
+- 实际 VPS 登录密码、Mac 虚拟机系统密码、RustDesk 设备 ID、公钥和验证结果只记录在部署机 `/opt/3xui-selfhost-kit/runtime/install-summary.txt`，文件权限保持 `600`，不得提交到 Git。

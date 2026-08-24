@@ -65,6 +65,12 @@ Explicit ports if needed:
 ID Server:    ${server}:21116
 Relay Server: ${server}:21117
 
+RustDesk Web Client (HTTPS):
+ID Server:    ${server}
+API Server:   (leave blank)
+WSS ID:       wss://${server}/ws/id
+WSS Relay:    wss://${server}/ws/relay
+
 Data:         ${RUSTDESK_DATA_DIR}
 Image:        ${RUSTDESK_IMAGE}
 EOF

@@ -288,15 +288,33 @@ xui_builtin_sub_caddy_block() {
 EOF
 }
 
+rustdesk_web_caddy_block() {
+  [ "${RUSTDESK_WEB_ENABLE:-1}" = "1" ] || return 0
+
+  cat <<'EOF'
+	# RustDesk Web Client secure WebSocket endpoints start
+	@rustdeskWebId path /ws/id
+	handle @rustdeskWebId {
+		reverse_proxy 127.0.0.1:21118
+	}
+	@rustdeskWebRelay path /ws/relay
+	handle @rustdeskWebRelay {
+		reverse_proxy 127.0.0.1:21119
+	}
+	# RustDesk Web Client secure WebSocket endpoints end
+EOF
+}
+
 write_caddyfile() {
   mkdir -p caddy
   local panel_path="${WEB_BASE_PATH:-panel}"
-  local xui_sub_block
+  local xui_sub_block rustdesk_web_block
   panel_path="${panel_path#/}"
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -z "${TLS_CERT_FILE:-}" ]; then
     adopt_existing_primary_cert "${TLS_SERVER_NAME:-${SERVER_ADDR:-}}" "${DOMAIN_NAMES:-}" || true
   fi
   xui_sub_block="$(xui_builtin_sub_caddy_block)"
+  rustdesk_web_block="$(rustdesk_web_caddy_block)"
   if [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     cat > caddy/Caddyfile <<EOF
 {
@@ -316,6 +334,7 @@ write_caddyfile() {
 		reverse_proxy 127.0.0.1:${PANEL_PORT:-2053}
 	}
 ${xui_sub_block}
+${rustdesk_web_block}
 	handle_path /subconverter/* {
 		reverse_proxy 127.0.0.1:${SUBCONVERTER_PORT:-25500}
 	}
