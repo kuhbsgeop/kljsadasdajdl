@@ -11,7 +11,7 @@ if [ -f .env ]; then
   set +a
 fi
 
-RUSTDESK_IMAGE="${RUSTDESK_IMAGE:-rustdesk/rustdesk-server:1.1.15}"
+RUSTDESK_IMAGE="${RUSTDESK_IMAGE:-rustdesk/rustdesk-server:1.1.16}"
 RUSTDESK_DATA_DIR="${RUSTDESK_DATA_DIR:-/opt/rustdesk-server/data}"
 RUSTDESK_SERVER="${RUSTDESK_SERVER:-${SERVER_ADDR:-}}"
 
