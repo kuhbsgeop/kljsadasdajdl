@@ -2,8 +2,8 @@
 
 ## 订阅运行方式
 
-- `/sub/` 是普通用户入口：先刷新当前 3X-UI 入站链接，再自动生成 Clash 3.5 短订阅。
-- 直连订阅地址为 `/subscriptions/<SUBSCRIPTION_TOKEN>.b64`，令牌只保存在服务器 `.env` 文件中。
+- `/sub/` 是普通用户入口：自动同步当前 3X-UI 入站；默认复制 `/subconfig-api/clash.yaml?token=<订阅令牌>`，短订阅使用 `/subconfig-api/s/<随机ID>.yaml`，均返回完整 Clash Meta / Mihomo YAML。
+- 原始 `.txt` / `.b64` 节点列表供旧客户端与高级转换继续使用；已有无后缀短链接和 `/render/clash` 保持兼容。订阅令牌只保存在服务器受限文件中，不写入交接文档。
 - 域名节点模式会把每一组完整生成的链接映射回 `SERVER_ALIASES`，不得再次展开已分组列表；十域名、双协议部署应发布 20 个节点，而不是 200 个。
 - 公共刷新接口不接收输入，并受 `PUBLIC_LINK_REFRESH_INTERVAL` 限流（默认 60 秒）；配置编辑和转发管理继续使用 `SUB_CONFIG_ADMIN_TOKEN` 保护。
 
@@ -51,3 +51,33 @@
 - 设备 `1934025127` 曾出现四次 `invalid key`。如该设备仍在使用，应确认只有一个有效 RustDesk 实例使用该 ID，并在客户端重新填写本服务器配置公钥；不要复制另一台设备的 RustDesk 配置目录。
 - 2026-08-25 13:35 左右 VPS 发生一次没有正常关机日志的强制重启；应在 Vultr 控制台继续核对人工操作和宿主机事件。
 - 升级前备份目录、实际部署版本、容器校验结果、设备 ID、服务器配置公钥和密码说明必须继续写入部署机 `runtime/install-summary.txt`，不得写入公开仓库。
+
+
+## 2026-09-28 IBKR 固定 VPN 规则与排障方法复用
+
+- 功能范围：新增可选 `scripts/ibkr-vpn.py`，生成 Shadowrocket 模块或保留现有未知字段的 Mihomo 配置副本；新增 `scripts/ibkr-network-check.py`，通过指定本地 HTTP 代理检查公开 HTTPS/交易网关，不接触账户或交易接口。
+- 路由要求：IBKR 使用单一具体 VPN 节点，无 DIRECT 备用；拒绝将 Mihomo 自动选择/轮询组当作固定节点；IBKR DNS 使用同一代理的可信 DoH，不关闭 TLS 校验。
+- 本机诊断证据：旧启动日志出现代理 503、读取超时和下载域名证书不匹配；系统/部分解析路径返回的下载地址与可信 DoH 不一致。可信 DoH 地址经代理的 HTTPS 验证成功。以上是网络异常证据，尚不足以证明每次数据连接弹窗的唯一根因。
+- 已完成：源代码、中文使用与回滚说明、自动化回归和 CI 检查入口已编写。
+- 测试结果：31 项 unittest 回归通过；17 个 shell 文件 `bash -n` 通过；4 个 Python 工具语法编译通过；Shadowrocket 实际模块产物已生成，提交前 7 个变更文件敏感模式扫描无命中；Amazon 全局生成 dry-run 通过。
+- 构建与外部验收：本次为独立 Python 客户端工具，已生成交付模块；本机无 Docker/Mihomo，未运行服务镜像构建或原生 Mihomo 配置校验。生产部署未执行，服务端行为与已有订阅未修改。
+- 功能提交：`98e79ac6268ac8556b803e1514f91c50fee1acb2`；已推送 GitHub `fix/ibkr-fixed-vpn`，并核对远端分支提交一致。目标主分支为 `main`，尚未合并，服务器尚未部署。最终交接文档归档提交以该功能分支 HEAD 为准。
+- 客户端状态：本机模块已导入，用户反馈已打开；重新加载的编译证据和登录后持续稳定性仍待确认。Shadowrocket 特定版本对 Host DoH 参数的实际处理需要客户端验收，不能将生成器单元测试写成客户端实测通过。
+- 未完成项：IBKR 登录后行情/连续使用验收、实际固定 VPN 出口证明、客户端关闭时应用级阻断；域名规则不能覆盖所有直接 IP，也不实现系统 kill switch。
+- 三端/小程序状态：本次为桌面网络工具，不涉及 iOS/Android/微信小程序源码修改或上传提审。
+- 回滚：Shadowrocket 关闭/删除“IBKR稳定连接”模块；Mihomo 恢复生成前原配置；仓库变更可撤回该功能提交。只记录备份用途、受限保存位置和校验结果，不记录真实节点凭据、订阅令牌或账户资料。
+
+- 本机生成模块产物 SHA-256：`ea14abd50145a9141c3f37064bb75d55b415e6c87495d35b02052b3373202695`；原配置在当前任务 `work/ibkr-repair/original-config.sqlite` 受限备份（600），未修改原主配置记录。
+
+## 2026-09-28 默认订阅改为 Clash YAML
+
+- 功能范围：页面默认复制、下载、短订阅与安装摘要统一使用 YAML 链接；返回 `application/yaml` 与 `clash.yaml` 下载文件名。默认接口读取当前受管节点和原规则模板，不接受外部 source 覆盖；旧订阅与其他格式转换保留。
+- 兼容要求：VLESS / Reality 使用 Clash Meta / Mihomo；不承诺旧版 Clash 支持这些协议。HTTP 访问日志与渲染错误不输出订阅令牌、源链接或节点凭据。
+- 本地完成：源码、中文文档、HTTP 回归、页面脚本回归和生产镜像 CI 构建入口已完成。
+- 测试通过：39 项 Python 自动化回归（含真实本地 HTTP 请求）；页面默认复制/下载、初始化短链接、高级转换 Node.js 回归通过；17 个 shell 文件与全部 Python 源码语法检查通过，Git 差异空白检查通过。官方 Mihomo v1.19.31 对合成 VLESS Reality/Trojan HTTP 测试配置及完整生产 `3.5.yaml` 模板渲染结果执行 `-t` 均通过（节点为公开测试占位数据，不连接真实账户）。
+- 生产构建：GitHub Actions [36438110790](https://github.com/kuhbsgeop/kljsadasdajdl/actions/runs/36438110790) 的 `bash-syntax` 与 `subscription-image` 均通过，生产 Dockerfile 构建及容器内 39 项回归通过。该次 CI 镜像 ID 为 `sha256:1436bf7e562dfaccc6dd2155162a70057455cbf0e67985c6a56e4d63e0e5fe22`，用于构建验证，未部署生产；真实服务器订阅下载、客户端导入和节点连接仍待部署验收。
+- 功能提交：`e3ab832794ed402c3c0fbda6789ab3bb35ca20bc`，已推送 GitHub `fix/ibkr-fixed-vpn`，已核对本地与远端功能提交一致；文档归档提交以分支最终 HEAD 为准。
+- 发布状态：目标 `main`，沿用草稿 [PR #1](https://github.com/kuhbsgeop/kljsadasdajdl/pull/1)；尚未合并、尚未部署到服务器。Android/iOS 只涉及订阅客户端使用，不涉及 App 或微信小程序源码、上传、提审和发布。
+- 敏感扫描：仓库无专用扫描器；提交前对 9 个变更文件检查私钥、GitHub/API/AWS 令牌等敏感模式，无命中，不提交运行配置、节点产物或依赖目录。
+- 部署验收待完成：先检查服务器现有健康、版本和旧链路；备份 `.env`、数据库、规则模板及旧版本，记录提交/产物 SHA-256 和备份位置；更新后核对新旧订阅 HTTP、节点数量、模板规则、客户端实际连接、容器健康及错误日志。
+- 回滚：恢复部署前代码/镜像和原规则模板；原始订阅与旧短链接无需改写。本地修改可撤回本次功能提交，不能把 CI 通过写成服务器已部署。

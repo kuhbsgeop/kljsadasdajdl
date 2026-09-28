@@ -36,6 +36,14 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-cl
 
 更新会同步脚本和订阅页面、保留已有 `.env`、数据库与 3.5.yaml 规则，然后滚动更新服务。
 
+## Clash YAML 订阅
+
+打开服务器的 `/sub/` 页面，点击“复制 YAML 订阅”或“复制 YAML 短订阅”，将链接添加到 Clash Meta / Mihomo 客户端。下载内容是完整 YAML，包含当前节点、代理组与规则；节点由 3x-ui 自动同步，保留已有的 `3.5.yaml` 规则模板。VLESS / Reality 需要支持该协议的 Clash Meta / Mihomo 客户端。
+
+默认接口为 `/subconfig-api/clash.yaml?token=<订阅令牌>`，新短链接为 `/subconfig-api/s/<随机ID>.yaml`，下载文件名为 `clash.yaml`。链接包含访问授权，应在客户端或服务器受限文件中保管，不要提交到 Git 或公开转发。访问日志不记录请求链接与查询参数。
+
+已有无后缀短链接、`/render/clash` 接口和 `.txt` / `.b64` 原始订阅继续可用；高级转换使用原始节点列表，避免把完整 YAML 再当作节点链接转换。已有服务器需在此变更合并到 `main` 后执行上面的一键更新，并确认客户端实际下载和连接。
+
 ## 亚马逊住宅 IP 全局节点
 
 新服务器和已经安装过本项目的服务器都使用同一条命令：
@@ -72,3 +80,37 @@ sudo ./scripts/manage.sh amazon-global
 curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/install.sh \
   | sudo env CONFIG_WIZARD=1 MENU_AFTER_INSTALL=1 ENABLE_SYSTEMD_AUTOSTART=1 bash
 ```
+
+
+## IBKR 固定 VPN 连接
+
+IBKR Desktop 的长连接不适合自动切换或负载均衡轮询。此工具生成**可选客户端配置**：IBKR 域名优先使用一个明确的 VPN 节点，DNS 通过同一节点查询可信 DoH，不设置 `DIRECT` 备用。它不修改 3x-ui 入站、账户、节点凭据或现有订阅。
+
+在仓库目录安装已有 Python 依赖后，使用客户端里真实存在的**具体节点名称**，不要填自动选择、故障转移或负载均衡分组名称。名称不包含节点密码或订阅令牌。
+
+```bash
+python3 -m pip install -r subconfig-api/requirements.txt
+python3 scripts/ibkr-vpn.py --format shadowrocket --node-name '我的固定VPN节点' --output /tmp/IBKR-Stable-Connection.sgmodule
+```
+
+将输出文件导入 Shadowrocket 模块，启用后重新应用配置，再退出并打开 IBKR。模块会覆盖 `ibllc.com`、`ibllc.com.cn`、`ibkr.com`、`ibkr.com.cn`、`interactivebrokers.com` 的域名分流和 DNS；`use-local-host-item-for-proxy` 是配置级选项，导入前需要检查其他既有 Host 映射。关闭或删除模块即可回滚。
+
+已有 Mihomo 配置可生成一份独立副本，原文件和未知字段保留：
+
+```bash
+python3 scripts/ibkr-vpn.py --format mihomo --node-name '我的固定VPN节点' --input /安全目录/current.yaml --output /安全目录/ibkr.yaml
+```
+
+输入必须处于 Rule 模式，已启用 DNS 并配置 `proxy-server-nameserver`，且包含该具体节点。生成器拒绝 `DIRECT`、策略组、上游拨号策略和名称冲突；新增单节点 `IBKR固定VPN` 分组，并把 IBKR 规则放到原有规则之前。输出 YAML 可能包含输入中的节点凭据，权限为 `600`，不得提交、公开或粘贴到聊天。恢复原配置即可回滚。
+
+客户端重新加载后连续检查公共端点：
+
+```bash
+python3 scripts/ibkr-network-check.py --proxy http://127.0.0.1:1082 --rounds 3
+```
+
+Mihomo 用户将端口换为实际 HTTP/mixed 代理端口。脚本只通过所指定代理探测公开 HTTPS 和交易网关端口，不进行账户登录、下单、直连备用或关闭证书校验；代理 URL 不接受凭据。输出只含主机、端口、耗时和错误类别。HTTPS `403` 表示已连接并通过证书校验，不能解释为该页面业务成功；交易端口通过也不能解释为 IBKR 已登录或行情恢复。
+
+验收必须分别记录：配置生成、客户端导入、规则重新加载、实际节点/出口、IBKR 登录后行情刷新、连续使用是否再弹窗。域名规则不是按进程的全流量强制代理，也不是 VPN 关闭时的系统断网保护；未知域名、直接 IP 和代理客户端关闭后的流量仍需客户端/系统的应用级强制代理与阻断机制。不能把此工具宣称为“永久禁止 IBKR 直连”或“客户端卡断已经彻底修复”。
+
+DNS 代理参数依据 [Mihomo 官方 DNS 文档](https://wiki.metacubex.one/en/config/dns/)。未改变默认安装、Amazon 全局订阅或服务部署。

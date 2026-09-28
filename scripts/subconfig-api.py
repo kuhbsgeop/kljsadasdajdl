@@ -266,7 +266,12 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "3xui-subconfig/1.0"
 
     def log_message(self, fmt, *args):
-        print("%s - %s" % (self.address_string(), fmt % args), flush=True)
+        # Request targets may contain subscription/admin tokens or source links.
+        # Keep access logs useful without logging targets, headers or error text.
+        print("%s - %s" % (self.address_string(), getattr(self, "command", "HTTP")), flush=True)
+
+    def log_request(self, code="-", size="-"):
+        print("%s - %s %s" % (self.address_string(), getattr(self, "command", "HTTP"), code), flush=True)
 
     def send_text(self, status, body, content_type="text/plain; charset=utf-8", extra_headers=None):
         data = body.encode("utf-8")
@@ -324,6 +329,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/render/clash":
             self.render_clash(parsed)
+            return
+        if path == "/clash.yaml":
+            self.render_clash(parsed, managed=True)
             return
         if path.startswith("/s/"):
             self.render_short_link(path[3:])
@@ -487,11 +495,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json(200, {"success": True, "count": count, "cached": cached})
 
-    def render_clash(self, parsed):
+    def render_clash(self, parsed, managed=False):
         params = parse_qs(parsed.query)
         token = params.get("token", [""])[0]
-        source = params.get("source", [""])[0]
-        config_source = params.get("config", [""])[0]
+        source = MANAGED_SOURCE if managed else params.get("source", [""])[0]
+        config_source = "" if managed else params.get("config", [""])[0]
         if not token or not SUBSCRIPTION_TOKEN or not hmac.compare_digest(token, SUBSCRIPTION_TOKEN):
             self.send_text(401, "Unauthorized.")
             return
@@ -499,8 +507,8 @@ class Handler(BaseHTTPRequestHandler):
             config_text = load_config_text(config_source)
             links = load_source_links(source)
             rendered = render_clash_config(config_text, links)
-        except Exception as exc:
-            self.send_text(500, f"Render failed: {exc}")
+        except Exception:
+            self.send_text(500, "Subscription rendering failed.")
             return
         self.send_clash(rendered)
 
@@ -517,15 +525,22 @@ class Handler(BaseHTTPRequestHandler):
                 payload.get("config", ""),
                 managed=bool(payload.get("managed", False)),
             )
-        except Exception as exc:
-            self.send_json(400, {"success": False, "error": str(exc)})
+        except Exception:
+            self.send_json(400, {"success": False, "error": "Subscription short link could not be created."})
             return
         self.send_json(
             200,
-            {"success": True, "id": short_id, "path": f"/subconfig-api/s/{short_id}", "count": count},
+            {"success": True, "id": short_id, "path": f"/subconfig-api/s/{short_id}.yaml", "count": count},
         )
 
     def render_short_link(self, short_id):
+        for suffix in (".yaml", ".yml"):
+            if short_id.endswith(suffix):
+                short_id = short_id[:-len(suffix)]
+                break
+        if not SHORT_ID_RE.fullmatch(short_id):
+            self.send_text(404, "Short link not found.")
+            return
         try:
             source, config_source = load_short_link(short_id)
             config_text = load_config_text(config_source)
@@ -534,8 +549,8 @@ class Handler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self.send_text(404, "Short link not found.")
             return
-        except Exception as exc:
-            self.send_text(500, f"Render failed: {exc}")
+        except Exception:
+            self.send_text(500, "Subscription rendering failed.")
             return
         self.send_clash(rendered)
 
@@ -543,9 +558,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_text(
             200,
             rendered,
-            "text/yaml; charset=utf-8",
+            "application/yaml; charset=utf-8",
             {
-                "Content-Disposition": 'inline; filename="clash.yaml"',
+                "Content-Disposition": 'attachment; filename="clash.yaml"',
                 "Cache-Control": "no-store",
             },
         )
