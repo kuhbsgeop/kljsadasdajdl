@@ -27,6 +27,9 @@ jobs:
           bash -n scripts/menu.sh
           python3 -m py_compile scripts/subconfig-api.py
           python3 -m py_compile scripts/amazon-global.py
+          python3 -m py_compile scripts/ibkr-vpn.py scripts/ibkr-network-check.py
+          python3 scripts/ibkr-vpn.py --format shadowrocket --node-name example-vpn --output /tmp/ibkr.sgmodule
+          python3 scripts/ibkr-network-check.py --help > /dev/null
           ./scripts/amazon-global.sh --dry-run > /tmp/amazon-global.yaml
           python3 -c 'import yaml; c=yaml.safe_load(open("/tmp/amazon-global.yaml")); assert c["rules"][-1].startswith("MATCH,")'
           python3 -m unittest discover -s tests -v
