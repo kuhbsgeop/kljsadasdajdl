@@ -75,7 +75,9 @@
 - 兼容要求：VLESS / Reality 使用 Clash Meta / Mihomo；不承诺旧版 Clash 支持这些协议。HTTP 访问日志与渲染错误不输出订阅令牌、源链接或节点凭据。
 - 本地完成：源码、中文文档、HTTP 回归、页面脚本回归和生产镜像 CI 构建入口已完成。
 - 测试通过：39 项 Python 自动化回归（含真实本地 HTTP 请求）；页面默认复制/下载、初始化短链接、高级转换 Node.js 回归通过；17 个 shell 文件与全部 Python 源码语法检查通过，Git 差异空白检查通过。官方 Mihomo v1.19.31 对合成 VLESS Reality/Trojan HTTP 测试配置及完整生产 `3.5.yaml` 模板渲染结果执行 `-t` 均通过（节点为公开测试占位数据，不连接真实账户）。
-- 生产构建：本机无 Docker，生产 Dockerfile 构建与容器内回归由 GitHub Actions 执行，结果待推送后核对；真实服务器订阅下载、客户端导入和节点连接仍待部署验收。
-- 发布状态：本次变更待提交推送到 GitHub `fix/ibkr-fixed-vpn`，目标 `main`，沿用 PR #1；尚未合并、尚未部署到服务器。Android/iOS 只涉及订阅客户端使用，不涉及 App 或微信小程序源码、上传、提审和发布。
+- 生产构建：GitHub Actions [36438110790](https://github.com/kuhbsgeop/kljsadasdajdl/actions/runs/36438110790) 的 `bash-syntax` 与 `subscription-image` 均通过，生产 Dockerfile 构建及容器内 39 项回归通过。该次 CI 镜像 ID 为 `sha256:1436bf7e562dfaccc6dd2155162a70057455cbf0e67985c6a56e4d63e0e5fe22`，用于构建验证，未部署生产；真实服务器订阅下载、客户端导入和节点连接仍待部署验收。
+- 功能提交：`e3ab832794ed402c3c0fbda6789ab3bb35ca20bc`，已推送 GitHub `fix/ibkr-fixed-vpn`，已核对本地与远端功能提交一致；文档归档提交以分支最终 HEAD 为准。
+- 发布状态：目标 `main`，沿用草稿 [PR #1](https://github.com/kuhbsgeop/kljsadasdajdl/pull/1)；尚未合并、尚未部署到服务器。Android/iOS 只涉及订阅客户端使用，不涉及 App 或微信小程序源码、上传、提审和发布。
+- 敏感扫描：仓库无专用扫描器；提交前对 9 个变更文件检查私钥、GitHub/API/AWS 令牌等敏感模式，无命中，不提交运行配置、节点产物或依赖目录。
 - 部署验收待完成：先检查服务器现有健康、版本和旧链路；备份 `.env`、数据库、规则模板及旧版本，记录提交/产物 SHA-256 和备份位置；更新后核对新旧订阅 HTTP、节点数量、模板规则、客户端实际连接、容器健康及错误日志。
 - 回滚：恢复部署前代码/镜像和原规则模板；原始订阅与旧短链接无需改写。本地修改可撤回本次功能提交，不能把 CI 通过写成服务器已部署。
