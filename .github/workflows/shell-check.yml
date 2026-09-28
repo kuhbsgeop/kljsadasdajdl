@@ -33,3 +33,13 @@ jobs:
           ./scripts/amazon-global.sh --dry-run > /tmp/amazon-global.yaml
           python3 -c 'import yaml; c=yaml.safe_load(open("/tmp/amazon-global.yaml")); assert c["rules"][-1].startswith("MATCH,")'
           python3 -m unittest discover -s tests -v
+          node tests/test_subscription_ui.js
+
+  subscription-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production subscription service image
+        run: docker build -f subconfig-api/Dockerfile -t subconfig-api:ci .
+      - name: Run subscription regressions with production Python dependencies
+        run: docker run --rm -v "$PWD:/workspace:ro" -w /workspace subconfig-api:ci python -m unittest discover -s tests -v

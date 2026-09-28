@@ -209,16 +209,16 @@ write_web_ui() {
 <body>
   <main>
     <h1>节点订阅</h1>
-    <p>默认自动同步服务器当前入站并生成 Clash 3.5 短订阅。无需粘贴节点、填写 Token 或手动保存默认项。</p>
+    <p>默认自动同步服务器当前入站，复制或打开订阅即可获取完整 YAML 配置。VLESS / Reality 节点请使用 Clash Meta / Mihomo 客户端。</p>
     <section class="primary">
-      <label>当前节点订阅</label>
+      <label>Clash YAML 订阅</label>
       <code id="sourceLink"></code>
-      <button onclick="copySource()">复制订阅</button>
-      <a id="openSource" class="button" target="_blank" rel="noreferrer">打开订阅</a>
+      <button onclick="copySource()">复制 YAML 订阅</button>
+      <a id="openSource" class="button" target="_blank" rel="noreferrer">下载 YAML 配置</a>
       <button class="secondary" onclick="refreshLinks()">刷新并重新生成</button>
-      <label>Clash 3.5 短订阅</label>
+      <label>Clash YAML 短订阅</label>
       <code id="result">正在同步服务器节点…</code>
-      <button class="secondary" onclick="copyResult()">复制短订阅</button>
+      <button class="secondary" onclick="copyResult()">复制 YAML 短订阅</button>
       <code id="allLinksStatus">首次打开会自动检查当前服务器节点。</code>
     </section>
     <details>
@@ -230,7 +230,7 @@ write_web_ui() {
       <div>
         <label for="target">目标格式</label>
         <select id="target">
-          <option value="clash-35">Clash 3.5.yaml</option>
+          <option value="clash-35">Clash Meta / Mihomo YAML</option>
           <option value="clash">Clash subconverter</option>
           <option value="singbox">sing-box</option>
           <option value="v2ray">V2Ray</option>
@@ -267,7 +267,8 @@ write_web_ui() {
   <script>
     const token = "${token}";
     const defaultConfig = location.origin + "/sub/config/3.5.yaml";
-    const localSub = location.origin + "/subscriptions/" + token + ".b64";
+    const rawSub = location.origin + "/subscriptions/" + token + ".b64";
+    const localSub = location.origin + "/subconfig-api/clash.yaml?token=" + encodeURIComponent(token);
     const urlEl = document.getElementById("url");
     const targetEl = document.getElementById("target");
     const configEl = document.getElementById("config");
@@ -289,7 +290,7 @@ write_web_ui() {
     targetEl.addEventListener("change", () => { resultEl.dataset.url = ""; });
     async function buildClash35Link() {
       const customSource = urlEl.value.trim();
-      const source = customSource || localSub;
+      const source = customSource || rawSub;
       const config = configEl.value.trim();
       if (!source) throw new Error("请先粘贴至少一条节点连接");
       const response = await fetch(location.origin + "/subconfig-api/shorten?token=" + encodeURIComponent(token), {
@@ -310,7 +311,7 @@ write_web_ui() {
     async function build() {
       const targetValue = targetEl.value;
       const config = configEl.value.trim();
-      const source = urlEl.value.trim() || localSub;
+      const source = urlEl.value.trim() || rawSub;
       localStorage.setItem("xuiSubSource", source);
       localStorage.setItem("xuiSubTarget", targetValue);
       localStorage.setItem("xuiSubConfig", config || defaultConfig);
@@ -360,6 +361,9 @@ write_web_ui() {
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || response.statusText);
         const result = await buildClash35Link();
+        resultEl.textContent = result.url;
+        resultEl.title = "已保存 " + result.count + " 个节点";
+        resultEl.dataset.url = result.url;
         document.getElementById("allLinksStatus").textContent =
           (data.cached ? "已使用最近同步" : "已同步") + " " + data.count + " 条当前节点。";
       } catch (error) {
@@ -369,7 +373,7 @@ write_web_ui() {
     }
     async function copySource() {
       await navigator.clipboard.writeText(localSub);
-      document.getElementById("allLinksStatus").textContent = "当前节点订阅已复制。";
+      document.getElementById("allLinksStatus").textContent = "Clash YAML 订阅已复制。";
     }
     async function configApi(method, body, path = "/config") {
       const headers = {"X-Admin-Token": adminTokenEl.value.trim()};
@@ -488,12 +492,10 @@ main() {
   echo "  $(public_origin_hint)/sub/"
   echo "Forward web UI:"
   echo "  $(public_origin_hint)/forward/"
-  echo "Tokenized local node subscription:"
-  echo "  $(public_origin_hint)/subscriptions/${SUBSCRIPTION_TOKEN}.txt"
+  echo "Clash YAML subscription: open the subscription Web UI and copy the YAML link."
   echo "Default conversion config:"
   echo "  $(public_origin_hint)/sub/config/3.5.yaml"
-  echo "Rules editor token:"
-  echo "  ${SUB_CONFIG_ADMIN_TOKEN}"
+  echo "Rules editor token: stored in the protected .env file (SUB_CONFIG_ADMIN_TOKEN)."
 }
 
 main "$@"

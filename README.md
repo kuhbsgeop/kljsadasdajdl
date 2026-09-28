@@ -36,6 +36,14 @@ curl -fsSL https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main/one-cl
 
 更新会同步脚本和订阅页面、保留已有 `.env`、数据库与 3.5.yaml 规则，然后滚动更新服务。
 
+## Clash YAML 订阅
+
+打开服务器的 `/sub/` 页面，点击“复制 YAML 订阅”或“复制 YAML 短订阅”，将链接添加到 Clash Meta / Mihomo 客户端。下载内容是完整 YAML，包含当前节点、代理组与规则；节点由 3x-ui 自动同步，保留已有的 `3.5.yaml` 规则模板。VLESS / Reality 需要支持该协议的 Clash Meta / Mihomo 客户端。
+
+默认接口为 `/subconfig-api/clash.yaml?token=<订阅令牌>`，新短链接为 `/subconfig-api/s/<随机ID>.yaml`，下载文件名为 `clash.yaml`。链接包含访问授权，应在客户端或服务器受限文件中保管，不要提交到 Git 或公开转发。访问日志不记录请求链接与查询参数。
+
+已有无后缀短链接、`/render/clash` 接口和 `.txt` / `.b64` 原始订阅继续可用；高级转换使用原始节点列表，避免把完整 YAML 再当作节点链接转换。已有服务器需在此变更合并到 `main` 后执行上面的一键更新，并确认客户端实际下载和连接。
+
 ## 亚马逊住宅 IP 全局节点
 
 新服务器和已经安装过本项目的服务器都使用同一条命令：
