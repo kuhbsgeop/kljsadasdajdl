@@ -35,7 +35,7 @@ services:
       context: .
       dockerfile: subconfig-api/Dockerfile
       args:
-        PYTHON_IMAGE: ${SUB_CONFIG_API_BASE_IMAGE:-python:3-alpine}
+        PYTHON_IMAGE: ${SUB_CONFIG_API_BASE_IMAGE:-python:3.13-slim-bookworm}
     container_name: ${SUB_CONFIG_API_CONTAINER:-3xui_subconfig_api}
     command: ["python", "/app/subconfig-api.py"]
     network_mode: host
