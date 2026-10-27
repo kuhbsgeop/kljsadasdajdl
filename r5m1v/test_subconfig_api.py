@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "subconfig-api.py"
+MODULE_PATH = Path(__file__).resolve().parents[1] / "n6j0p" / "subconfig-api.py"
 SPEC = importlib.util.spec_from_file_location("subconfig_api", MODULE_PATH)
 api = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(api)

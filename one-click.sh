@@ -123,7 +123,7 @@ run_update() {
 
   log "Downloading safe-update.sh from ${REPO_RAW_BASE}."
   tmp="$(mktemp)"
-  if ! curl -fsSL "${REPO_RAW_BASE}/scripts/safe-update.sh" -o "$tmp"; then
+  if ! curl -fsSL "${REPO_RAW_BASE}/n6j0p/safe-update.sh" -o "$tmp"; then
     rm -f "$tmp"
     die "Could not download safe-update.sh."
   fi
@@ -141,7 +141,7 @@ run_amazon_global() {
       log "Refreshing the Amazon residential-IP global command in ${target}."
       for component in amazon-global.sh amazon-global.py; do
         tmp="$(mktemp)"
-        if ! curl -fsSL "${REPO_RAW_BASE}/scripts/${component}" -o "$tmp"; then
+        if ! curl -fsSL "${REPO_RAW_BASE}/n6j0p/${component}" -o "$tmp"; then
           rm -f "$tmp"
           die "Could not download scripts/${component}."
         fi

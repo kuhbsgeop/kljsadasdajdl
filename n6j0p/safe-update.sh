@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${INSTALL_DIR:-}"
+if [ -z "$ROOT_DIR" ] || [ ! -f "$ROOT_DIR/.env" ]; then
+  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+if [ ! -f "$ROOT_DIR/.env" ] && [ -f /opt/3xui-selfhost-kit/.env ]; then
+  ROOT_DIR=/opt/3xui-selfhost-kit
+fi
 cd "$ROOT_DIR"
 
 [ -f .env ] || { echo ".env not found. Run install.sh first." >&2; exit 1; }
@@ -33,13 +39,23 @@ REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/kljs
   set +a
 }
 
+repo_source_path() {
+  case "$1" in
+    scripts/*) printf 'n6j0p/%s' "${1#scripts/}" ;;
+    site/*) printf 'k4q8c/%s' "${1#site/}" ;;
+    caddy/*) printf 'a9f2x/%s' "${1#caddy/}" ;;
+    subconfig-api/*) printf 'u3t7w/%s' "${1#subconfig-api/}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 download_kit_file() {
   local src="$1"
   local dst="$2"
   local tmp
   mkdir -p "$(dirname "$dst")"
   tmp="$(mktemp)"
-  if ! curl -fsSL "${REPO_RAW_BASE}/${src}" -o "$tmp"; then
+  if ! curl -fsSL "${REPO_RAW_BASE}/$(repo_source_path "$src")" -o "$tmp"; then
     rm -f "$tmp"
     return 1
   fi

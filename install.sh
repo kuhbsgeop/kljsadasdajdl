@@ -237,11 +237,21 @@ ensure_docker() {
   docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is still unavailable after Docker install."
 }
 
+repo_source_path() {
+  case "$1" in
+    scripts/*) printf 'n6j0p/%s' "${1#scripts/}" ;;
+    site/*) printf 'k4q8c/%s' "${1#site/}" ;;
+    caddy/*) printf 'a9f2x/%s' "${1#caddy/}" ;;
+    subconfig-api/*) printf 'u3t7w/%s' "${1#subconfig-api/}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 download_file() {
   local src="$1"
   local dst="$2"
   mkdir -p "$(dirname "$dst")"
-  curl -fsSL "${REPO_RAW_BASE}/${src}" -o "$dst"
+  curl -fsSL "${REPO_RAW_BASE}/$(repo_source_path "$src")" -o "$dst"
 }
 
 download_project() {

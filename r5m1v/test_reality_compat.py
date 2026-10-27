@@ -4,10 +4,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-APPLY_PRESETS = (ROOT / "scripts" / "apply-presets.sh").read_text(encoding="utf-8")
+APPLY_PRESETS = (ROOT / "n6j0p" / "apply-presets.sh").read_text(encoding="utf-8")
 INSTALL = (ROOT / "install.sh").read_text(encoding="utf-8")
-RECONCILE = (ROOT / "scripts" / "reconcile.sh").read_text(encoding="utf-8")
-SAFE_UPDATE = (ROOT / "scripts" / "safe-update.sh").read_text(encoding="utf-8")
+RECONCILE = (ROOT / "n6j0p" / "reconcile.sh").read_text(encoding="utf-8")
+SAFE_UPDATE = (ROOT / "n6j0p" / "safe-update.sh").read_text(encoding="utf-8")
 
 
 class RealityCompatibilityTests(unittest.TestCase):

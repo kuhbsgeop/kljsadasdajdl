@@ -1,0 +1,32 @@
+name: b7e2q
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  bash-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: a9d1q
+        run: python3 -m pip install --requirement u3t7w/requirements.txt
+      - name: a2k9x
+        run: |
+          bash -n one-click.sh
+          bash -n install.sh
+          bash -n n6j0p/manage.sh
+          bash -n n6j0p/apply-presets.sh
+          bash -n n6j0p/domain-cert.sh
+          bash -n n6j0p/subscription.sh
+          bash -n n6j0p/start-services.sh
+          bash -n n6j0p/open-ports.sh
+          bash -n n6j0p/amazon-global.sh
+          bash -n n6j0p/rustdesk.sh
+          bash -n n6j0p/protocol-guard.sh
+          bash -n n6j0p/menu.sh
+          python3 -m py_compile n6j0p/subconfig-api.py
+          python3 -m py_compile n6j0p/amazon-global.py
+          ./n6j0p/amazon-global.sh --dry-run > /tmp/amazon-global.yaml
+          python3 -c 'import yaml; c=yaml.safe_load(open("/tmp/amazon-global.yaml")); assert c["rules"][-1].startswith("MATCH,")'
+          python3 -m unittest discover -s r5m1v -v

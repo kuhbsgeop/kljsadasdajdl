@@ -8,7 +8,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "amazon-global.py"
+SCRIPT = ROOT / "n6j0p" / "amazon-global.py"
 LINK = (
     "vless://11111111-1111-4111-8111-111111111111@198.51.100.84:443"
     "?type=tcp&security=reality&pbk=publicKey&fp=chrome"
