@@ -498,15 +498,17 @@ WorkingDirectory=${INSTALL_DIR}
 ExecStart=/usr/bin/env bash ${INSTALL_DIR}/scripts/start-services.sh
 ExecStop=${docker_bin} compose --profile rustdesk stop 3xui subconverter subconfig-api caddy-site caddy-https hbbs hbbr
 RemainAfterExit=yes
-TimeoutStartSec=0
+TimeoutStartSec=180
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+  # Containers are already started by compose_up. Starting the oneshot unit here
+  # repeats Docker startup and can block the installer indefinitely.
   systemctl daemon-reload
-  systemctl enable --now 3xui-kit.service
-  log "Enabled boot autostart: 3xui-kit.service"
+  systemctl enable 3xui-kit.service
+  log "Boot autostart enabled without restarting the running services: 3xui-kit.service"
 }
 
 public_ip() {
