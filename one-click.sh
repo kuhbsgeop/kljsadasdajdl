@@ -12,9 +12,28 @@ need_root() {
   fi
 }
 
+validate_domains() {
+  local domain label
+  local -a domains labels
+  [ -n "${DOMAIN_NAMES:-}" ] || return 0
+  IFS=',' read -r -a domains <<< "${DOMAIN_NAMES}"
+  for domain in "${domains[@]}"; do
+    [[ ${#domain} -le 253 && "$domain" == *.* && "$domain" =~ ^[A-Za-z0-9.-]+$ ]] \
+      || die "Invalid domain: $domain"
+    [[ "$domain" != *..* && "$domain" != .* && "$domain" != *. ]] \
+      || die "Invalid domain: $domain"
+    [[ ! "$domain" =~ ^[0-9.]+$ ]] || die "Invalid domain: $domain"
+    IFS='.' read -r -a labels <<< "$domain"
+    for label in "${labels[@]}"; do
+      [[ ${#label} -le 63 && "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] \
+        || die "Invalid domain label in: $domain"
+    done
+  done
+}
+
 configure_defaults() {
   export CONFIG_WIZARD="${CONFIG_WIZARD:-0}"
-  export MENU_AFTER_INSTALL="${MENU_AFTER_INSTALL:-1}"
+  export MENU_AFTER_INSTALL="${MENU_AFTER_INSTALL:-0}"
   export ENABLE_SYSTEMD_AUTOSTART="${ENABLE_SYSTEMD_AUTOSTART:-1}"
   export ENABLE_PRESETS="${ENABLE_PRESETS:-1}"
   export ENABLE_SHADOWSOCKS="${ENABLE_SHADOWSOCKS:-1}"
@@ -39,7 +58,8 @@ configure_defaults() {
     export ACME_SERVER="${ACME_SERVER:-letsencrypt}"
     export ACME_FALLBACK_SERVER="${ACME_FALLBACK_SERVER:-zerossl}"
     export REQUIRE_DOMAIN_ORIGIN="${REQUIRE_DOMAIN_ORIGIN:-1}"
-    export STRICT_DOMAIN_CERT="${STRICT_DOMAIN_CERT:-0}"
+    export STRICT_DOMAIN_CERT="${STRICT_DOMAIN_CERT:-1}"
+    export PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-127.0.0.1}"
     export USE_DOMAIN_FOR_LINKS="${USE_DOMAIN_FOR_LINKS:-1}"
     export HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-1}"
     export HTTPS_HTTP_MODE="${HTTPS_HTTP_MODE:-redirect}"
@@ -49,7 +69,8 @@ configure_defaults() {
     export RECREATE_MANAGED_INBOUNDS="${RECREATE_MANAGED_INBOUNDS:-1}"
   fi
 
-  if [ "${PUBLIC_HTTP_PANEL:-0}" = "1" ] && [ -z "${DOMAIN_NAMES:-}" ]; then
+  # IP is the no-argument fresh-install default; do not overwrite an existing .env.
+  if [ -z "${DOMAIN_NAMES:-}" ] && { [ "${PUBLIC_HTTP_PANEL:-0}" = "1" ] || [ ! -f "${INSTALL_DIR:-/opt/3xui-selfhost-kit}/.env" ]; }; then
     export PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-0.0.0.0}"
     export ENABLE_ACME="${ENABLE_ACME:-0}"
     export STRICT_DOMAIN_CERT="${STRICT_DOMAIN_CERT:-0}"
@@ -134,14 +155,36 @@ run_amazon_global() {
 }
 
 main() {
+  local domain=""
   need_root
-  configure_defaults
   case "${1:-install}" in
-    install) run_install ;;
-    update|safe-update) run_update ;;
-    amazon-global|amazon|amazon-node) run_amazon_global ;;
-    *) die "Usage: one-click.sh [install|update|amazon-global]" ;;
+    install)
+      [ "$#" -le 2 ] || die "Only one optional domain argument is supported."
+      domain="${2:-}"
+      ;;
+    update|safe-update)
+      configure_defaults
+      run_update
+      return
+      ;;
+    amazon-global|amazon|amazon-node)
+      configure_defaults
+      run_amazon_global
+      return
+      ;;
+    *)
+      [ "$#" -eq 1 ] || die "Usage: one-click.sh [domain]"
+      domain="$1"
+      ;;
   esac
+
+  if [ -n "$domain" ]; then
+    [ -z "${DOMAIN_NAMES:-}" ] || die "Specify the domain only once."
+    export DOMAIN_NAMES="$domain"
+  fi
+  validate_domains
+  configure_defaults
+  run_install
 }
 
 main "$@"
