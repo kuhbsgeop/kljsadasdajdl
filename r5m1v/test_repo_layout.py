@@ -45,9 +45,10 @@ class RepositoryLayoutTests(unittest.TestCase):
         self.assertNotIn("systemctl enable --now", setup)
         self.assertNotIn("systemctl start 3xui-kit.service", setup)
         self.assertIn("TimeoutStartSec=180", setup)
+        main_body = INSTALL.rsplit("main() {", 1)[1]
         self.assertLess(
-            INSTALL.index("  install_systemd_autostart"),
-            INSTALL.index("  wait_panel_db"),
+            main_body.index("  install_systemd_autostart"),
+            main_body.index("  wait_panel_db"),
         )
 
     def test_repository_keeps_runtime_compatible_file_list(self):
