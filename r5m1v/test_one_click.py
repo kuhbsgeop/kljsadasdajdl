@@ -22,7 +22,7 @@ main "$@"
 
 
 class OneClickTests(unittest.TestCase):
-    def run_one_click(self, *args, domain_env=None, existing=False):
+    def run_one_click(self, *args, domain_env=None, existing=False, menu_after_install=None):
         with tempfile.TemporaryDirectory() as tmp:
             env = os.environ.copy()
             for key in (
@@ -34,6 +34,8 @@ class OneClickTests(unittest.TestCase):
             script_copy.write_text(SCRIPT.read_text(encoding="utf-8").rsplit('main "$@"', 1)[0], encoding="utf-8")
             env["SCRIPT"] = str(script_copy)
             env["INSTALL_DIR"] = tmp
+            if menu_after_install is not None:
+                env["MENU_AFTER_INSTALL"] = menu_after_install
             if domain_env is not None:
                 env["DOMAIN_NAMES"] = domain_env
             if existing:
@@ -46,17 +48,22 @@ class OneClickTests(unittest.TestCase):
     def test_no_domain_defaults_to_public_ip(self):
         result = self.run_one_click()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("install|domain=|bind=0.0.0.0|https=0|strict=0|menu=0", result.stdout)
+        self.assertIn("install|domain=|bind=0.0.0.0|https=0|strict=0|menu=1", result.stdout)
 
     def test_domain_arg_enables_strict_https(self):
         result = self.run_one_click("example.com")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("domain=example.com|bind=127.0.0.1|https=1|strict=1|menu=0", result.stdout)
+        self.assertIn("domain=example.com|bind=127.0.0.1|https=1|strict=1|menu=1", result.stdout)
 
     def test_domain_env_is_supported(self):
         result = self.run_one_click(domain_env="example.com,www.example.com")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("domain=example.com,www.example.com|bind=127.0.0.1|https=1", result.stdout)
+
+    def test_menu_can_be_disabled_explicitly(self):
+        result = self.run_one_click(menu_after_install="0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("menu=0", result.stdout)
 
     def test_invalid_domains_rejected(self):
         for domain in ("-example.com", "example..com", "example.com/evil", "127.0.0.1"):
