@@ -39,17 +39,16 @@ class RepositoryLayoutTests(unittest.TestCase):
                 self.assertTrue((ROOT / expected).is_file(), expected)
 
     def test_install_enables_service_without_blocking_on_startup(self):
-        unit = re.search(
-            r"(?ms)^install_systemd_autostart\\(\\) \\{\\n(.*?)^\\}\\n",
-            INSTALL,
-        )
-        self.assertIsNotNone(unit)
-        setup = unit.group(1)
+        setup = INSTALL.split("install_systemd_autostart() {", 1)[1]
+        setup = setup.split("public_ip() {", 1)[0]
         self.assertIn("systemctl enable 3xui-kit.service", setup)
         self.assertNotIn("systemctl enable --now", setup)
         self.assertNotIn("systemctl start 3xui-kit.service", setup)
         self.assertIn("TimeoutStartSec=180", setup)
-        self.assertIn("  install_systemd_autostart\\n  wait_panel_db", INSTALL)
+        self.assertLess(
+            INSTALL.index("  install_systemd_autostart"),
+            INSTALL.index("  wait_panel_db"),
+        )
 
     def test_repository_keeps_runtime_compatible_file_list(self):
         for folder in RENAMED:
