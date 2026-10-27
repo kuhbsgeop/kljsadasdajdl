@@ -51,6 +51,14 @@ class RepositoryLayoutTests(unittest.TestCase):
             main_body.index("  wait_panel_db"),
         )
 
+    def test_api_image_uses_prebuilt_pyyaml_wheels(self):
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        dockerfile = (ROOT / "u3t7w" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("python:3.13-slim-bookworm", compose)
+        self.assertIn("ARG PYTHON_IMAGE=python:3.13-slim-bookworm", dockerfile)
+        self.assertIn("--only-binary=:all:", dockerfile)
+        self.assertNotIn("python:3-alpine", compose)
+
     def test_repository_keeps_runtime_compatible_file_list(self):
         for folder in RENAMED:
             self.assertFalse((ROOT / folder).is_dir())
