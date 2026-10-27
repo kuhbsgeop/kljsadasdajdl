@@ -70,6 +70,21 @@ class OneClickTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("bind=unset", result.stdout)
 
+    def test_local_sources_only_from_real_entrypoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = SCRIPT.read_text(encoding="utf-8").rsplit('main "$@"', 1)[0]
+            for filename, expected in (("one-click.sh", tmp), ("piped-or-other.sh", "")):
+                with self.subTest(filename=filename):
+                    script = Path(tmp) / filename
+                    script.write_text(source, encoding="utf-8")
+                    env = dict(os.environ, SCRIPT=str(script))
+                    result = subprocess.run(
+                        ["bash", "-c", 'source "$SCRIPT"; local_project_dir'],
+                        text=True, capture_output=True, env=env, check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), expected)
+
     def test_existing_management_commands_remain(self):
         for action, expected in (("update", "update"), ("amazon-global", "amazon-global")):
             with self.subTest(action=action):

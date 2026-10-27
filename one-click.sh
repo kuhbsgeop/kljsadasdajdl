@@ -85,11 +85,20 @@ configure_defaults() {
   fi
 }
 
+# When the entrypoint is piped from curl, never execute a similarly named
+# script found in the caller's working directory with root privileges.
+local_project_dir() {
+  local source_path="${BASH_SOURCE[0]:-}"
+  if [ -n "$source_path" ] && [ "${source_path##*/}" = "one-click.sh" ] && [ -f "$source_path" ]; then
+    (cd "$(dirname "$source_path")" && pwd)
+  fi
+}
+
 run_install() {
   local script_dir local_install tmp
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  script_dir="$(local_project_dir)"
   local_install="${script_dir}/install.sh"
-  if [ -f "$local_install" ]; then
+  if [ -n "$script_dir" ] && [ -f "$local_install" ]; then
     log "Running local install.sh with one-click defaults."
     exec bash "$local_install"
   fi
@@ -105,9 +114,9 @@ run_install() {
 
 run_update() {
   local script_dir local_update tmp
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  script_dir="$(local_project_dir)"
   local_update="${script_dir}/scripts/safe-update.sh"
-  if [ -f "$local_update" ]; then
+  if [ -n "$script_dir" ] && [ -f "$local_update" ]; then
     log "Running local safe-update.sh."
     exec bash "$local_update"
   fi
@@ -123,11 +132,11 @@ run_update() {
 
 run_amazon_global() {
   local script_dir installed_dir target component tmp
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  script_dir="$(local_project_dir)"
   installed_dir="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 
   for target in "$script_dir" "$installed_dir"; do
-    if [ -f "${target}/.env" ]; then
+    if [ -n "$target" ] && [ -f "${target}/.env" ]; then
       mkdir -p "${target}/scripts"
       log "Refreshing the Amazon residential-IP global command in ${target}."
       for component in amazon-global.sh amazon-global.py; do
