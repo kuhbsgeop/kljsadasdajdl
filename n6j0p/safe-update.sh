@@ -118,6 +118,8 @@ sync_kit_files() {
   echo
   echo "Reconciling local hardening, domains, subscriptions, and protocols..."
   ./scripts/reconcile.sh
+  echo "Re-applying certificate renewal cron (logs to /var/log/acme-cron.log)..."
+  ./scripts/domain-cert.sh --install-renewal-cron || true
   echo "===== safe update completed $(date -u +%FT%TZ) ====="
 } >> runtime/safe-update.log 2>&1
 EOF
