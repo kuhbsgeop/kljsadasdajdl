@@ -8,8 +8,8 @@ cd "$ROOT_DIR"
 
 OVERRIDE_KEYS=(
   XUI_CONTAINER PANEL_PORT WEB_BASE_PATH SERVER_ADDR DOMAIN_NAMES SERVER_ALIASES DOMAIN_NODE_MODE
-  DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
-  REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X REALITY_MIN_CLIENT_VERSION
+  DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP VLESS_NODE_COUNT
+  REALITY_PORT REALITY_DEST_SITES REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X REALITY_MIN_CLIENT_VERSION
   ENABLE_HYSTERIA ENABLE_TROJAN ENABLE_SHADOWSOCKS ALLOW_SELF_SIGNED_TLS
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
   ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
@@ -51,7 +51,12 @@ DOMAIN_PORT_MODE="${DOMAIN_PORT_MODE:-1}"
 DOMAIN_PORT_START="${DOMAIN_PORT_START:-}"
 DOMAIN_PORT_STEP="${DOMAIN_PORT_STEP:-1}"
 REALITY_MIN_CLIENT_VERSION="${REALITY_MIN_CLIENT_VERSION:-1.8.2}"
-ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+# Default REALITY dest/SNI rotation list: each node gets a different
+# high-traffic site (dest is "<site>:443", SNI is the site) so nodes do not
+# share one fingerprint. Keep in sync with install.sh.
+DEFAULT_REALITY_DEST_SITES="www.cloudflare.com,www.microsoft.com,www.apple.com,www.amazon.com,www.github.com,www.bing.com,www.adobe.com,www.mozilla.org,www.ubuntu.com,www.oracle.com"
+REALITY_DEST_SITES="${REALITY_DEST_SITES:-$DEFAULT_REALITY_DEST_SITES}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-0}"
 ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
 ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
 ADSPOWER_PROXY_LISTEN="${ADSPOWER_PROXY_LISTEN:-0.0.0.0}"
@@ -306,18 +311,40 @@ safe_node_label() {
 }
 
 build_vless_domain_client_specs() {
-  local tmp domain safe email uuid sub_id idx port
+  local tmp domain safe orig_safe email uuid sub_id idx port
+  local -a domains=()
+  local -A seen=()
   tmp="$(mktemp)"
   sub_id="${ALL_NODES_SUB_ID:-$DEFAULT_SUB_ID}"
   idx=0
   : > "$tmp"
 
-  domain_node_values | while IFS= read -r domain; do
+  # Collect the domain values (one node per value).
+  while IFS= read -r domain; do
     [ -n "$domain" ] || continue
+    domains+=("$domain")
+  done < <(domain_node_values)
+
+  # Pad to VLESS_NODE_COUNT with the server IP so a no-domain install
+  # still gets multiple nodes (each on its own port, distinct Reality dest).
+  local want="${VLESS_NODE_COUNT:-10}"
+  [[ "$want" =~ ^[0-9]+$ ]] || want=10
+  [ "$want" -ge 1 ] || want=1
+  while [ "${#domains[@]}" -lt "$want" ]; do
+    domains+=("${SERVER_ADDR:-YOUR_SERVER_IP}")
+  done
+
+  for domain in "${domains[@]}"; do
     port="$(domain_port_for_index "$idx")"
-    idx=$((idx + 1))
     safe="$(safe_node_label "$domain")"
     [ -n "$safe" ] || safe="domain"
+    orig_safe="$safe"
+    if [ -n "${seen[$orig_safe]:-}" ]; then
+      # Same address reused for another node (padded IP entries): make
+      # the client email unique by appending the port.
+      safe="${orig_safe}-${port}"
+    fi
+    seen[$orig_safe]=1
     email="me-vless-${safe}-${PRESET_CLIENT_SUFFIX}"
     uuid="$(new_uuid)"
     jq -n \
@@ -327,6 +354,7 @@ build_vless_domain_client_specs() {
       --argjson port "$port" \
       --arg subId "$sub_id" \
       '{domain:$domain,email:$email,uuid:$uuid,port:$port,subId:$subId}' >> "$tmp"
+    idx=$((idx + 1))
   done
 
   if [ ! -s "$tmp" ]; then
@@ -595,14 +623,33 @@ sync_reality_client_compatibility() {
   }
 }
 
+# reality_dest_site <index>: the REALITY dest site for node <index>, rotating
+# through REALITY_DEST_SITES. dest is always "<site>:443" and serverNames is
+# [<site>], so dest and SNI always match. An empty list falls back to the
+# legacy single target (first of REALITY_SERVER_NAMES).
+reality_dest_site() {
+  local idx="$1"
+  local sites_csv="${REALITY_DEST_SITES:-$DEFAULT_REALITY_DEST_SITES}"
+  local -a sites=()
+  local IFS=',' part
+  for part in $sites_csv; do
+    part="${part//[[:space:]]/}"
+    [ -n "$part" ] && sites+=("$part")
+  done
+  if [ "${#sites[@]}" -eq 0 ]; then
+    first_csv "${REALITY_SERVER_NAMES:-www.cloudflare.com}"
+    return
+  fi
+  printf '%s' "${sites[$((idx % ${#sites[@]}))]}"
+}
+
 write_vless_reality_per_domain() {
   local keypair private_key public_key short_id server_names_json sni clients_json spec
-  local domain port remark file client_json safe base_port
+  local domain port remark file client_json safe base_port node_idx dest_site target
 
   clients_json="$(build_vless_domain_client_specs)"
-  server_names_json="$(csv_to_json_array "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
-  sni="$(first_csv "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
   base_port="$(domain_port_base)"
+  node_idx=0
   if [ "${RECREATE_MANAGED_INBOUNDS:-0}" = "1" ] && [ "$base_port" != "443" ]; then
     delete_inbound_by_remark "auto-vless-reality-443"
   fi
@@ -622,12 +669,19 @@ write_vless_reality_per_domain() {
     public_key="$(printf '%s' "$keypair" | jq -r '.obj.publicKey')"
     short_id="$(rand_hex 8)"
 
+    # Each node gets a different dest site (rotated by node index); dest and
+    # SNI always match because both come from the same site.
+    dest_site="$(reality_dest_site "$node_idx")"
+    target="${dest_site}:443"
+    server_names_json="$(jq -nc --arg s "$dest_site" '[$s]')"
+    sni="$dest_site"
+
     jq -n \
       --arg remark "$remark" \
       --argjson port "$port" \
       --arg shareAddr "$domain" \
       --argjson clients "$client_json" \
-      --arg target "${REALITY_TARGET:-www.cloudflare.com:443}" \
+      --arg target "$target" \
       --argjson serverNames "$server_names_json" \
       --arg privateKey "$private_key" \
       --arg publicKey "$public_key" \
@@ -709,9 +763,11 @@ write_vless_reality_per_domain() {
           '"vless://\(.uuid)@\(.domain):\(.port)?type=tcp&security=reality&pbk=\($publicKey)&fp=chrome&sni=\($sni)&sid=\($shortId)&spx=%2F&flow=xtls-rprx-vision#\($remark)@\(.domain)"'
         echo
       } >> runtime/client-links.txt
+      printf '%s %s %s\n' "$remark" "$port" "$dest_site" >> runtime/reality-dest-sites.txt
     else
       update_vless_domain_clients "$remark" "$client_json" "$domain" || true
     fi
+    node_idx=$((node_idx + 1))
   done < <(printf '%s' "$clients_json" | jq -c '.[]')
 }
 
@@ -736,7 +792,7 @@ write_vless_reality() {
   fi
 
   local remark="auto-vless-reality-${REALITY_PORT:-443}"
-  local keypair private_key public_key short_id sub_id server_names_json sni file clients_json
+  local keypair private_key public_key short_id sub_id server_names_json sni file clients_json dest_site target
 
   keypair="$(api_get "/panel/api/server/getNewX25519Cert")"
   private_key="$(printf '%s' "$keypair" | jq -r '.obj.privateKey')"
@@ -744,8 +800,10 @@ write_vless_reality() {
   short_id="$(rand_hex 8)"
   sub_id="${ALL_NODES_SUB_ID:-$DEFAULT_SUB_ID}"
   clients_json="$(build_vless_domain_client_specs)"
-  server_names_json="$(csv_to_json_array "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
-  sni="$(first_csv "${REALITY_SERVER_NAMES:-www.cloudflare.com}")"
+  dest_site="$(reality_dest_site 0)"
+  target="${dest_site}:443"
+  server_names_json="$(jq -nc --arg s "$dest_site" '[$s]')"
+  sni="$dest_site"
   file="runtime/vless-reality.json"
 
   jq -n \
@@ -753,7 +811,7 @@ write_vless_reality() {
     --argjson port "${REALITY_PORT:-443}" \
     --arg shareAddr "${SERVER_ADDR:-}" \
     --argjson clients "$clients_json" \
-    --arg target "${REALITY_TARGET:-www.cloudflare.com:443}" \
+    --arg target "$target" \
     --argjson serverNames "$server_names_json" \
     --arg privateKey "$private_key" \
     --arg publicKey "$public_key" \
@@ -840,6 +898,7 @@ write_vless_reality() {
         <<< "$clients_json"
       echo
     } >> runtime/client-links.txt
+    printf '%s %s %s\n' "$remark" "${REALITY_PORT:-443}" "$dest_site" >> runtime/reality-dest-sites.txt
   else
     update_vless_domain_clients "$remark" "$clients_json" || true
   fi
@@ -915,7 +974,7 @@ write_hysteria2_optional() {
         security: "tls",
         tlsSettings: {
           serverName: $sni,
-          minVersion: "1.2",
+          minVersion: "1.3",
           maxVersion: "1.3",
           cipherSuites: "",
           rejectUnknownSni: false,
@@ -981,6 +1040,8 @@ write_trojan_per_domain() {
     file="runtime/trojan-ws-tls-${port}-${safe}.json"
     client_json="$(printf '%s' "$spec" | jq -s '.')"
 
+    # Non-Trojan handshakes fall back to the local masquerade site (Caddy :80)
+    # so probes see a real website instead of a proxy signature.
     jq -n \
       --arg remark "$remark" \
       --argjson port "$port" \
@@ -1013,7 +1074,7 @@ write_trojan_per_domain() {
             comment: ("domain-node:" + .domain + "; generated by 3xui-selfhost-kit"),
             reset: 0
           })),
-          fallbacks: []
+          fallbacks: [{dest: "127.0.0.1:80"}]
         },
         streamSettings: {
           network: "ws",
@@ -1092,6 +1153,8 @@ write_trojan_optional() {
   sub_id="${ALL_NODES_SUB_ID:-$DEFAULT_SUB_ID}"
   file="runtime/trojan-ws-tls.json"
 
+  # Non-Trojan handshakes fall back to the local masquerade site (Caddy :80)
+  # so probes see a real website instead of a proxy signature.
   jq -n \
     --arg remark "$remark" \
     --argjson port "${TROJAN_PORT:-9443}" \
@@ -1126,7 +1189,7 @@ write_trojan_optional() {
           comment: "generated by 3xui-selfhost-kit",
           reset: 0
         }],
-        fallbacks: []
+        fallbacks: [{dest: "127.0.0.1:80"}]
       },
       streamSettings: {
         network: "ws",
@@ -1305,7 +1368,7 @@ EOF
 }
 
 write_adspower_proxy_optional() {
-  if [ "$(truthy "${ENABLE_ADSPOWER_PROXY:-1}")" != "true" ]; then
+  if [ "$(truthy "${ENABLE_ADSPOWER_PROXY:-0}")" != "true" ]; then
     return 0
   fi
 
@@ -1393,6 +1456,13 @@ write_dokodemo_inbound() {
   [ -n "$target_address" ] || { echo "Dokodemo target address is empty." >&2; return 1; }
   [ -n "$target_port" ] || { echo "Dokodemo target port is empty." >&2; return 1; }
 
+  case "$listen" in
+    0.0.0.0|::)
+      echo "WARNING: dokodemo-door tunnel on ${listen}:${port} is an unauthenticated public forwarder." >&2
+      echo "WARNING: Anyone on the internet can use it to reach ${target_address}:${target_port}. Use 127.0.0.1 unless the forward is meant to be public." >&2
+      ;;
+  esac
+
   remark="auto-dokodemo-door-${port}"
   file="runtime/dokodemo-door-${port}.json"
 
@@ -1467,11 +1537,11 @@ write_dokodemo_optional() {
       target_address="${target_address:-}"
       target_port="${target_port:-}"
       network="${network:-tcp}"
-      listen="${listen:-0.0.0.0}"
+      listen="${listen:-127.0.0.1}"
       follow="${follow:-0}"
       tproxy="${tproxy:-off}"
       write_dokodemo_inbound "$listen" "$port" "$target_address" "$target_port" "$network" "$follow" "$tproxy"
-    done < <(printf '%s' "$DOKODEMO_FORWARDS" | tr ';' '\n')
+    done < <(printf '%s\n' "$DOKODEMO_FORWARDS" | tr ';' '\n')
     return 0
   fi
 
@@ -1711,6 +1781,7 @@ write_panel_links() {
 }
 
 : > runtime/client-links.txt
+: > runtime/reality-dest-sites.txt
 wait_api
 write_vless_reality
 sync_reality_client_compatibility
@@ -1733,6 +1804,7 @@ if [ ! -s runtime/client-links.txt ] && [ -s runtime/panel-all-links.txt ]; then
 fi
 
 api_post_form "/panel/api/server/restartXrayService" | jq . || true
-chmod 600 runtime/client-links.txt
+chmod 600 runtime/client-links.txt runtime/reality-dest-sites.txt
 echo "Client links saved to runtime/client-links.txt"
+echo "Per-node REALITY dest sites saved to runtime/reality-dest-sites.txt"
 echo "Panel-rendered links saved to runtime/panel-all-links.txt"

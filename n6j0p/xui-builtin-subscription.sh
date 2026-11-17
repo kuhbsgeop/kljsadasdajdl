@@ -439,9 +439,17 @@ EOF
 }
 
 secure_firewall() {
-  if command -v ufw >/dev/null 2>&1; then
+  command -v ufw >/dev/null 2>&1 || return 0
+  if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+    # Domain HTTPS mode: Caddy reverse-proxies the subscription, so keep
+    # the built-in port closed to the public internet.
     ufw delete allow "${XUI_BUILTIN_SUB_PORT}/tcp" >/dev/null 2>&1 || true
     ufw deny "${XUI_BUILTIN_SUB_PORT}/tcp" >/dev/null 2>&1 || true
+  else
+    # No domain: no Caddy reverse proxy exists, so direct :2096 is the
+    # only public path for the subscription; open it.
+    ufw delete deny "${XUI_BUILTIN_SUB_PORT}/tcp" >/dev/null 2>&1 || true
+    ufw allow "${XUI_BUILTIN_SUB_PORT}/tcp" >/dev/null 2>&1 || true
   fi
 }
 

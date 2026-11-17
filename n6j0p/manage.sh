@@ -36,7 +36,7 @@ SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
 SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
 HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
 SUB_CONFIG_ADMIN_TOKEN="${SUB_CONFIG_ADMIN_TOKEN:-}"
-ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-0}"
 ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
 ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
 ADSPOWER_PROXY_LISTEN="${ADSPOWER_PROXY_LISTEN:-0.0.0.0}"
@@ -70,6 +70,7 @@ Commands:
   protocol-guard Disable or delete unsafe inbound protocols
   forward        Add/update a dokodemo-door/tunnel port forward
   forward-web    Open the port-forward web UI with token auto-filled
+  security-check Run the read-only security self-check (PASS/WARN/FAIL)
 
 Open ports examples:
   ./scripts/manage.sh open-ports 80 443 8443-8450
@@ -290,6 +291,12 @@ configure_forward() {
   validate_no_newline "target address" "$target_addr"
   validate_no_newline "listen address" "$listen_addr"
   network="$(normalize_network "$network")"
+  case "$listen_addr" in
+    0.0.0.0|::)
+      echo "WARNING: This forward listens on ${listen_addr}: it is an unauthenticated public forwarder." >&2
+      echo "WARNING: Anyone on the internet can use it to reach ${target_addr}:${target_port}. Use 127.0.0.1 unless the forward is meant to be public." >&2
+      ;;
+  esac
   case "$follow_redirect" in
     y|Y|yes|YES|1|true|TRUE) follow_redirect=1 ;;
     *) follow_redirect=0 ;;
@@ -335,11 +342,11 @@ case "$cmd" in
       ./scripts/menu.sh --print
     else
       echo "Visual panel:"
-      echo "  Bind:      ${PANEL_LISTEN_IP:-127.0.0.1}:${PANEL_PORT:-2053}"
+      echo "  Bind:      ${PANEL_LISTEN_IP:-0.0.0.0}:${PANEL_PORT:-2053}"
       echo "  Path:      /${WEB_BASE_PATH:-panel}/"
       if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
         echo "  Direct:    https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
-      elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+      elif [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "::" ]; then
         echo "  Direct:    http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
       else
         echo "  Local:     http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
@@ -458,6 +465,12 @@ case "$cmd" in
     ;;
   network-check)
     ./scripts/network-check.sh
+    ;;
+  security-check)
+    # The connector push cannot carry file modes, so a raw checkout may hold
+    # this script without the executable bit; make it executable here.
+    chmod +x ./scripts/security-check.sh 2>/dev/null || true
+    ./scripts/security-check.sh
     ;;
   adspower-proxy|adsproxy|fingerprint-proxy)
     configure_adspower_proxy

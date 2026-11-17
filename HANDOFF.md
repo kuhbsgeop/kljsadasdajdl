@@ -1,5 +1,47 @@
 # 3x-ui 自托管工具包交接文档
 
+## 安装自动加固
+
+一键安装会在装完后自动做这些加固（无需手动操作）：
+
+- SSH：写 `/etc/ssh/sshd_config.d/00-3xui-hardening.conf`——密钥登录、最多 3 次认证尝试、30 秒登录宽限；默认开密码登录（`SSH_PASSWORD_AUTH=1`，`PasswordAuthentication yes`、`PermitRootLogin yes`，方便手机客户端）；设 `SSH_PASSWORD_AUTH=0` 时才关密码（`PasswordAuthentication no`、`KbdInteractiveAuthentication no`、`PermitRootLogin prohibit-password`），且只有确认 root 已有 `authorized_keys` 公钥时才关，否则跳过并打印醒目警告；写完 `sshd -t` 校验，通过才 reload。
+- fail2ban（默认开，`ENABLE_FAIL2BAN=0` 可关）：sshd jail，`banaction=ufw`，10 分钟内 5 次失败封 1 小时；装不上或无 ufw 时跳过，不影响安装。
+- unattended-upgrades（默认开，`ENABLE_UNATTENDED_UPGRADES=0` 可关）：自动安装安全更新。
+- UFW：先放行 SSH（22 及当前 sshd 端口），再设默认拒绝并 `ufw --force enable`；启用后核实 active，否则打印醒目失败提示。
+- 文件权限：`.env`、面板数据库 `data/db/x-ui.db`（含 `-shm`/`-wal`）、RustDesk 数据库文件均为 600。
+- 禁 core 转储：`compose.yaml` 里各服务均设 `ulimits: core: 0`，防止崩溃转储把内存里的敏感内容写盘。
+- 隧道默认本机监听：`DOKODEMO_FORWARDS` 未指定监听地址时默认 `127.0.0.1`；监听 `0.0.0.0`/`::` 时打印明确警告（无认证公开转发，任何人都能用），但不改变用户有意选公开监听时的行为。
+- 节点凭据：每个节点独立随机生成（VLESS UUID、Trojan 密码、Reality X25519 密钥对、短 ID），无复用、无硬编码默认密码；安装结束时自检脚本会验证凭据无空值、无重复。
+
+安装结束时自动跑一遍只读安全自检（`scripts/security-check.sh`，也可单独跑或 `./scripts/manage.sh security-check`）：输出 PASS/WARN/FAIL 汇总；FAIL 仅用于硬性安全失败（密码登录仍开、UFW 未启用、面板/订阅端口被放行、空令牌、节点凭据空值或重复等），WARN 用于有意但高风险的配置（公开隧道、面板 2FA 未开等）。自检不修改任何东西，不阻断安装/更新。
+
+仍需用户自己做的事（安装总结第 16 节也有清单）：
+
+- 在 3x-ui 面板里开启两步验证（2FA）。
+- 在第二个会话验证 SSH 密钥登录可用，再关闭当前会话。
+- 公开隧道（如有）确认是自己有意为之；不需要公开时改回 `127.0.0.1`。
+
+## 节点安全模型
+
+主力是 VLESS + REALITY（默认生成）：
+
+- Reality 握手与真实访问目标站的 TLS 握手无法区分；非 Reality 流量会被转发到目标站，探测者看到的是正常网站。每个节点独立随机生成 UUID、X25519 密钥对和短 ID。
+- 每个节点的 dest/SNI 各不相同：按节点序号从 `REALITY_DEST_SITES` 轮换分配（默认 10 个高流量站点：www.cloudflare.com、www.microsoft.com、www.apple.com、www.amazon.com、www.github.com、www.bing.com、www.adobe.com、www.mozilla.org、www.ubuntu.com、www.oracle.com；第 11 个节点起从头轮换）。dest 恒为 `<站点>:443`，serverNames 恒为 `[<站点>]`，两者必然一致。`REALITY_TARGET`/`REALITY_SERVER_NAMES` 只在列表被清空时作为旧的单站点回落。注意：已创建的节点不会自动换 dest——更新后需 `RECREATE_MANAGED_INBOUNDS=1` 重建节点才生效（重建会换链接，需重新下发订阅）。安装总结第 5 节列出轮换列表和每个新节点的 dest（来源：`runtime/reality-dest-sites.txt`）。
+- 自检（`scripts/security-check.sh`）验证每个 Reality 节点都有 dest、serverNames、shortId 和私钥（缺失为 FAIL）；dest 与 SNI 不一致出 WARN；全部节点 dest 相同出 WARN（提示重建以轮换）。
+
+Trojan（WS + TLS）是备用：默认仍可生成，供不支持 Reality 的客户端使用；WS 握手特征比 Reality 明显，抗检测弱一档。非 Trojan 流量回落到本机伪装站 `:80`（`fallbacks: 127.0.0.1:80`），探测者看到真实网站。
+
+默认不生成的协议：
+
+- Shadowsocks-2022：默认关闭（`ENABLE_SHADOWSOCKS=0`）。流量特征最易被识别；需要时显式开启。
+- Hysteria2：默认关闭（`ENABLE_HYSTERIA=0`），可选第二协议——QUIC + TLS 1.3，提供 UDP 传输多样性（TCP 被针对性封锁时仍可连通）与弱网性能；不带 obfs（Xray 侧 obfs 配置未经实测验证，暂不加入）。
+- VMess、明文（无 TLS/Reality）节点：永不生成；protocol-guard（`REQUIRE_SECURE_TRANSPORT=1`，默认开启）会禁用已出现的此类入站。Shadowsocks-2022 与 WireGuard 是协议层加密（AEAD/Noise），不在"明文"之列。
+
+端口与 443 方案（下一步推荐，尚未实现）：
+
+- 目前 Reality 在 8443 起的非标准端口（因为 Caddy 占了 443 服务面板/订阅/伪装站），自检会对此出一条 INFO 提示（不是 WARN/FAIL）。端口本身不是指纹——封锁靠协议特征识别，不是端口号；Reality 在 8443 上同样隐蔽，443 只是锦上添花（混入正常 HTTPS 流量）。
+- 把 Reality 移到 443 需要先解决面板/订阅的去向（它们现在走 Caddy :443 的域名 HTTPS），涉及安装流程与 Caddy 配置的大改，未在本轮实现；等实测安装验证通过后再排期。
+
 ## 订阅运行方式
 
 - `/sub/` 是普通用户入口：先刷新当前 3X-UI 入站链接，再自动生成 Clash 3.5 短订阅。
