@@ -14,6 +14,7 @@ set -a
 set +a
 
 XUI_CONTAINER="${XUI_CONTAINER:-3xui}"
+CADDY_HTTPS_CONTAINER="${CADDY_HTTPS_CONTAINER:-3xui_https_site}"
 SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
 SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
 AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-0}"
@@ -305,6 +306,27 @@ rustdesk_web_caddy_block() {
 EOF
 }
 
+# Validate the generated Caddyfile with the same Caddy image the kit runs.
+# The tls paths in the Caddyfile are container paths (/cert/...), so a host
+# caddy binary cannot validate them; only the docker form is used. When no
+# working docker daemon is available, validation is skipped (not failed).
+validate_caddyfile() {
+  local out docker_args=()
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    log "No working docker daemon; skipping Caddyfile validation."
+    return 0
+  fi
+  docker_args=(-v "$ROOT_DIR/caddy/Caddyfile:/etc/caddy/Caddyfile:ro")
+  if [ -d "$ROOT_DIR/data/cert" ]; then
+    docker_args+=(-v "$ROOT_DIR/data/cert:/cert:ro")
+  fi
+  if out="$(docker run --rm "${docker_args[@]}" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1)"; then
+    return 0
+  fi
+  log "caddy validate failed: ${out}" >&2
+  return 1
+}
+
 write_caddyfile() {
   mkdir -p caddy
   local panel_path="${WEB_BASE_PATH:-panel}"
@@ -315,6 +337,12 @@ write_caddyfile() {
   fi
   xui_sub_block="$(xui_builtin_sub_caddy_block)"
   rustdesk_web_block="$(rustdesk_web_caddy_block)"
+  # Keep the last good Caddyfile: a truncated or invalid rewrite must never
+  # take the site down (2026-11-16: Caddyfile was wiped to 0 bytes and the
+  # HTTPS container crash-looped).
+  if [ -s caddy/Caddyfile ]; then
+    cp -p caddy/Caddyfile caddy/Caddyfile.bak
+  fi
   if [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     cat > caddy/Caddyfile <<EOF
 {
@@ -322,6 +350,11 @@ write_caddyfile() {
 }
 
 :80 {
+	# ACME http-01 challenge: always served from the site root, never redirected.
+	handle /.well-known/acme-challenge/* {
+		root * /usr/share/caddy
+		file_server
+	}
 	redir https://{host}{uri} 308
 }
 
@@ -363,6 +396,11 @@ EOF
   elif [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_HTTP_MODE:-reject}" = "reject" ]; then
     cat > caddy/Caddyfile <<'EOF'
 :80 {
+	# ACME http-01 challenge: always served from the site root, never rejected.
+	handle /.well-known/acme-challenge/* {
+		root * /usr/share/caddy
+		file_server
+	}
 	respond "HTTPS is required." 403
 	header {
 		X-Content-Type-Options nosniff
@@ -399,10 +437,24 @@ EOF
 }
 EOF
   fi
+  if [ ! -s caddy/Caddyfile ]; then
+    log "Generated Caddyfile is empty; restoring the previous one."
+    if [ -s caddy/Caddyfile.bak ]; then
+      cp -p caddy/Caddyfile.bak caddy/Caddyfile
+    fi
+    return 1
+  fi
+  if ! validate_caddyfile; then
+    log "Generated Caddyfile failed validation; restoring the previous one."
+    if [ -s caddy/Caddyfile.bak ]; then
+      cp -p caddy/Caddyfile.bak caddy/Caddyfile
+    fi
+    return 1
+  fi
 }
 
 start_mask_site() {
-  write_caddyfile
+  write_caddyfile || { log "Caddyfile generation failed; keeping the running containers untouched."; return 1; }
   if [ "${TLS_CERT_FILE:-}" != "" ] && [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     docker compose --profile site stop caddy-site >/dev/null 2>&1 || true
     docker compose --profile https-site up -d --force-recreate caddy-https
@@ -434,10 +486,22 @@ install_acme() {
   curl -fsSL https://get.acme.sh | sh -s email="$email"
 }
 
+# Reload command stored with the certificate: after a renewal, both the
+# 3x-ui panel and the Caddy HTTPS site must pick up the new files. Restarting
+# only 3x-ui (the old behaviour) left Caddy serving the expired certificate.
+cert_reload_cmd() {
+  printf 'cd %s && docker restart %s >/dev/null 2>&1 || true; docker restart %s >/dev/null 2>&1 || true' "$ROOT_DIR" "$XUI_CONTAINER" "$CADDY_HTTPS_CONTAINER"
+}
+
 issue_cert() {
   local domains="$1"
   local primary="$2"
-  local acme domain_args=() domain_parts=() d server servers issue_ok acme_fullchain email
+  local force="${3:-}"
+  local acme domain_args=() issue_args=() domain_parts=() d server servers issue_ok acme_fullchain email
+
+  if [ -n "$force" ]; then
+    issue_args+=(--force)
+  fi
 
   install_acme
   acme="$(acme_bin)"
@@ -461,7 +525,7 @@ issue_cert() {
     "$acme" --register-account --server "$server" -m "$email" >/dev/null 2>&1 || true
     log "Issuing certificate for: ${domains} (CA: ${server})"
     issue_ok=1
-    if ! "$acme" --issue --server "$server" --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256; then
+    if ! "$acme" --issue --server "$server" --webroot "$ROOT_DIR/site" "${domain_args[@]}" --keylength ec-256 "${issue_args[@]}"; then
       log "Certificate issue/renewal failed on ${server}; trying to install an existing certificate or another CA."
     else
       issue_ok=0
@@ -474,7 +538,7 @@ issue_cert() {
     if ! "$acme" --install-cert -d "$primary" --ecc \
       --fullchain-file "$ROOT_DIR/data/cert/domains/fullchain.pem" \
       --key-file "$ROOT_DIR/data/cert/domains/privkey.pem" \
-      --reloadcmd "cd $ROOT_DIR && docker restart $XUI_CONTAINER >/dev/null 2>&1 || true"; then
+      --reloadcmd "$(cert_reload_cmd)"; then
       log "Could not install certificate for ${primary} from ${server}."
       continue
     fi
@@ -497,6 +561,7 @@ issue_cert() {
     TLS_KEY_FILE="/root/cert/domains/privkey.pem"
     TLS_SERVER_NAME="$primary"
     ACME_SERVER="$server"
+    install_renewal_cron || log "Warning: renewal cron setup failed; the native acme.sh cron entry is still in place." >&2
     return 0
   done <<< "$servers"
 
@@ -504,35 +569,41 @@ issue_cert() {
   return 1
 }
 
-cert_covers_domains() {
-  local domains="$1"
-  local cert="$ROOT_DIR/data/cert/domains/fullchain.pem"
-  local sans d domain_parts=()
+# Comma-separated SAN domains of a certificate. Joins wrapped openssl output
+# lines first: long SAN lists wrap mid-domain, which breaks naive greps.
+cert_san_domains() {
+  local cert="$1"
 
   [ -s "$cert" ] || return 1
   command -v openssl >/dev/null 2>&1 || return 1
-  sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+  openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null \
+    | tr -d '\n' | tr -d ' ' | grep -o 'DNS:[^,]*' | sed 's/^DNS://' \
+    | paste -sd, -
+}
+
+cert_covers_domains() {
+  local domains="$1"
+  local sans d domain_parts=()
+
+  sans="$(cert_san_domains "$ROOT_DIR/data/cert/domains/fullchain.pem")" || return 1
   [ -n "$sans" ] || return 1
 
   IFS=',' read -r -a domain_parts <<< "$domains"
   for d in "${domain_parts[@]}"; do
     [ -n "$d" ] || continue
-    printf '%s\n' "$sans" | grep -F "DNS:${d}" >/dev/null || return 1
+    domain_in_list "$d" "$sans" || return 1
   done
   return 0
 }
 
 cert_covers_domain() {
   local domain="$1"
-  local cert="$ROOT_DIR/data/cert/domains/fullchain.pem"
   local sans
 
   [ -n "$domain" ] || return 1
-  [ -s "$cert" ] || return 1
-  command -v openssl >/dev/null 2>&1 || return 1
-  sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+  sans="$(cert_san_domains "$ROOT_DIR/data/cert/domains/fullchain.pem")" || return 1
   [ -n "$sans" ] || return 1
-  printf '%s\n' "$sans" | grep -F "DNS:${domain}" >/dev/null
+  domain_in_list "$domain" "$sans"
 }
 
 cert_covered_domains_from_list() {
@@ -548,6 +619,111 @@ cert_covered_domains_from_list() {
     fi
   done
   printf '%s' "$result"
+}
+
+# True when the certificate expires within 30 days (acme.sh's renewal window).
+# Unreadable expiry is treated as due, so renewal is never skipped on a
+# parse failure.
+cert_renewal_due() {
+  local cert="$1"
+  local end_text end_epoch now_epoch remaining
+
+  end_text="$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2)"
+  [ -n "$end_text" ] || return 0
+  end_epoch="$(date -d "$end_text" +%s 2>/dev/null || true)"
+  [ -n "$end_epoch" ] || return 0
+  now_epoch="$(date +%s)"
+  remaining=$((end_epoch - now_epoch))
+  [ "$remaining" -lt $((30 * 86400)) ]
+}
+
+# Replace acme.sh's native cron entry (silent, no DNS filtering) with the
+# filtered renewal wrapper, logging to /var/log/acme-cron.log. Idempotent:
+# safe to run on every install, renewal, and safe-update. The previous
+# schedule is kept when one exists.
+install_renewal_cron() {
+  local cert="$ROOT_DIR/data/cert/domains/fullchain.pem"
+  local log_file="/var/log/acme-cron.log"
+  local cron_line schedule existing tmp_cron
+
+  [ -s "$cert" ] || { log "No installed certificate; skipping renewal cron setup."; return 0; }
+  command -v crontab >/dev/null 2>&1 || { log "crontab not found; skipping renewal cron setup."; return 0; }
+
+  schedule="14 5,11,17,23 * * *"
+  existing="$(crontab -l 2>/dev/null | grep -F -e "acme.sh --cron" -e "domain-cert.sh --renew" | head -n 1 || true)"
+  if [ -n "$existing" ]; then
+    schedule="$(printf '%s' "$existing" | awk '{print $1, $2, $3, $4, $5}')"
+  fi
+  if [ "$(printf '%s' "$schedule" | awk '{print NF}')" -ne 5 ]; then
+    schedule="14 5,11,17,23 * * *"
+  fi
+  cron_line="${schedule} cd $ROOT_DIR && ./scripts/domain-cert.sh --renew >> $log_file 2>&1"
+
+  touch "$log_file" 2>/dev/null || true
+  chmod 600 "$log_file" 2>/dev/null || true
+
+  tmp_cron="$(mktemp)"
+  { crontab -l 2>/dev/null || true; } | grep -v -F -e "acme.sh --cron" -e "domain-cert.sh --renew" > "$tmp_cron" || true
+  printf '%s\n' "$cron_line" >> "$tmp_cron"
+  if ! crontab "$tmp_cron"; then
+    log "Failed to install the certificate renewal cron entry." >&2
+    rm -f "$tmp_cron"
+    return 1
+  fi
+  rm -f "$tmp_cron"
+  log "Certificate renewal cron installed (logs to $log_file)."
+}
+
+# DNS-filtered certificate renewal, run from cron. The native acme.sh --cron
+# renews the stored domain list verbatim, so one dead domain (DNS gone)
+# fails the whole renewal; this wrapper drops dead domains first and only
+# re-issues when renewal is actually due.
+renew_cert() {
+  local cert="$ROOT_DIR/data/cert/domains/fullchain.pem"
+  local sans live_domains dead_domains primary acme
+
+  [ -s "$cert" ] || { log "No installed certificate found at $cert; nothing to renew."; return 1; }
+  sans="$(cert_san_domains "$cert")" || { log "Could not read SANs from the installed certificate; leaving it untouched."; return 1; }
+  [ -n "$sans" ] || { log "Installed certificate has no SAN domains; leaving it untouched."; return 1; }
+  log "Renewal check for certificate domains: $sans"
+
+  live_domains="$(acme_ready_domains "$sans")"
+  dead_domains="$(domain_list_difference "$sans" "$live_domains")"
+  if [ -n "$dead_domains" ]; then
+    log "Domains dropped from renewal (no DNS record or not pointing to this VPS): $dead_domains"
+  fi
+  if [ -z "$live_domains" ]; then
+    log "ERROR: no live domains left for renewal; keeping the existing certificate untouched. Fix DNS, then rerun the domain command." >&2
+    return 1
+  fi
+
+  if [ -z "$dead_domains" ]; then
+    # Every domain is alive: let acme.sh handle timing and renewal natively.
+    install_renewal_cron || log "Warning: could not refresh the renewal cron entry." >&2
+    acme="$(acme_bin)" || { log "acme.sh not found; cannot renew."; return 1; }
+    if ! "$acme" --cron; then
+      log "acme.sh --cron failed; see above for details." >&2
+      return 1
+    fi
+    log "acme.sh --cron completed."
+    return 0
+  fi
+
+  # Some domains are dead: only re-issue when renewal is actually due, so a
+  # still-valid certificate is never churned (and rate limits are not hit).
+  if ! cert_renewal_due "$cert"; then
+    log "Certificate is not due for renewal yet; dead domains will be dropped at renewal time. Keeping the existing certificate."
+    install_renewal_cron || log "Warning: could not refresh the renewal cron entry." >&2
+    return 0
+  fi
+
+  primary="$(first_domain "$live_domains")"
+  log "Renewal due; re-issuing certificate for live domains only: $live_domains"
+  if ! issue_cert "$live_domains" "$primary" "--force"; then
+    log "ERROR: renewal re-issue failed for: $live_domains" >&2
+    return 1
+  fi
+  log "Certificate renewed for: $live_domains"
 }
 
 use_existing_cert() {
@@ -945,7 +1121,17 @@ main() {
   echo "  HTTP模式: ${HTTPS_HTTP_MODE:-reject}"
   echo "  证书: ${ROOT_DIR}/data/cert/domains/fullchain.pem"
   echo "  私钥: ${ROOT_DIR}/data/cert/domains/privkey.pem"
-  echo "  自动续期: acme.sh cron"
+  echo "  自动续期: scripts/domain-cert.sh --renew (cron，日志 /var/log/acme-cron.log)"
 }
 
-main "$@"
+case "${1:-}" in
+  --renew)
+    renew_cert
+    ;;
+  --install-renewal-cron)
+    install_renewal_cron
+    ;;
+  *)
+    main "$@"
+    ;;
+esac
