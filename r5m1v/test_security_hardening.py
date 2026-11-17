@@ -140,6 +140,12 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn("VLESS_NODE_COUNT=${VLESS_NODE_COUNT:-10}", heredoc)
         self.assertIn("SSH_PASSWORD_AUTH=${SSH_PASSWORD_AUTH:-1}", heredoc)
 
+    def test_builtin_subscription_runs_without_domain(self):
+        fn = INSTALL.split("configure_xui_builtin_subscription() {", 1)[1]
+        fn = fn.split("configure_protocol_guard() {", 1)[0]
+        self.assertNotIn("HTTPS_SITE_ENABLE", fn)
+        self.assertIn("xui-builtin-subscription.sh", fn)
+
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]
         setup = setup.split("enable_unattended_upgrades() {", 1)[0]

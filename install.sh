@@ -754,11 +754,12 @@ configure_xui_builtin_subscription() {
   if [ "${XUI_BUILTIN_SUB_ENABLE:-1}" != "1" ]; then
     return
   fi
-  if [ "${HTTPS_SITE_ENABLE:-0}" != "1" ]; then
-    log "Skipping 3x-ui built-in public subscription URI until HTTPS site is enabled."
-    return
-  fi
-  log "Configuring 3x-ui built-in subscription behind HTTPS reverse proxy."
+  # Runs with or without a domain: the script sets the panel's sub
+  # settings (path/port) in both cases and only skips the HTTPS public
+  # URI + Caddy proxy when there is no domain. Without this, the panel
+  # keeps its auto-generated random subPath and the direct :2096 link
+  # (the only subscription path without a domain) 404s.
+  log "Configuring 3x-ui built-in subscription."
   if ! (cd "$INSTALL_DIR" && ./scripts/xui-builtin-subscription.sh); then
     log "3x-ui built-in subscription setup did not fully complete. Retry later with: cd ${INSTALL_DIR} && ./scripts/manage.sh xui-subscription"
   fi
