@@ -8,8 +8,6 @@ services:
     network_mode: host
     volumes:
       - ${RUSTDESK_DATA_DIR:-/opt/rustdesk-server/data}:/root
-    ulimits:
-      core: 0
     restart: unless-stopped
 
   hbbr:
@@ -21,8 +19,6 @@ services:
     network_mode: host
     volumes:
       - ${RUSTDESK_DATA_DIR:-/opt/rustdesk-server/data}:/root
-    ulimits:
-      core: 0
     restart: unless-stopped
 
   subconverter:
@@ -32,8 +28,6 @@ services:
       - "25500"
     ports:
       - "127.0.0.1:${SUBCONVERTER_PORT:-25500}:25500"
-    ulimits:
-      core: 0
     restart: unless-stopped
 
   subconfig-api:
@@ -65,8 +59,6 @@ services:
       - ./site/sub/config:/config
       - ./site/subscriptions:/subscriptions
       - ./data/subconfig:/data
-    ulimits:
-      core: 0
     restart: unless-stopped
 
   3xui:
@@ -86,8 +78,6 @@ services:
       XUI_LOG_LEVEL: ${XUI_LOG_LEVEL:-info}
       XUI_PORT: ${PANEL_PORT:-2053}
       XUI_INIT_WEB_BASE_PATH: "/${WEB_BASE_PATH:-panel}"
-    ulimits:
-      core: 0
     restart: unless-stopped
 
   caddy-site:
@@ -102,8 +92,6 @@ services:
       - ./data/cert:/cert:ro
       - ./data/caddy:/data
       - ./data/caddy-config:/config
-    ulimits:
-      core: 0
     restart: unless-stopped
 
   caddy-https:
@@ -118,6 +106,4 @@ services:
       - ./data/cert:/cert:ro
       - ./data/caddy:/data
       - ./data/caddy-config:/config
-    ulimits:
-      core: 0
     restart: unless-stopped

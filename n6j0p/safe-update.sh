@@ -73,7 +73,6 @@ sync_kit_files() {
     "scripts/xui-builtin-subscription.sh"
     "scripts/mask-site.sh"
     "scripts/protocol-guard.sh"
-    "scripts/security-check.sh"
     "scripts/open-ports.sh"
     "scripts/amazon-global.sh"
     "scripts/amazon-global.py"
@@ -119,9 +118,8 @@ sync_kit_files() {
   echo
   echo "Reconciling local hardening, domains, subscriptions, and protocols..."
   ./scripts/reconcile.sh
-  echo
-  echo "Running security self-check (report only; warnings do not block the update)..."
-  ./scripts/security-check.sh || true
+  echo "Re-applying certificate renewal cron (logs to /var/log/acme-cron.log)..."
+  ./scripts/domain-cert.sh --install-renewal-cron || true
   echo "===== safe update completed $(date -u +%FT%TZ) ====="
 } >> runtime/safe-update.log 2>&1
 EOF

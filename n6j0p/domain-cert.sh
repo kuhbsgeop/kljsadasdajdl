@@ -17,7 +17,7 @@ XUI_CONTAINER="${XUI_CONTAINER:-3xui}"
 CADDY_HTTPS_CONTAINER="${CADDY_HTTPS_CONTAINER:-3xui_https_site}"
 SITE_HTTP_PORT="${SITE_HTTP_PORT:-80}"
 SITE_HTTPS_PORT="${SITE_HTTPS_PORT:-443}"
-AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-0}"
+AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-1}"
 HTTPS_SITE_ENABLE="${HTTPS_SITE_ENABLE:-0}"
 HTTPS_HTTP_MODE="${HTTPS_HTTP_MODE:-reject}"
 STRICT_DOMAIN_CERT="${STRICT_DOMAIN_CERT:-0}"
@@ -769,13 +769,13 @@ configure_firewall_ports() {
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     ports+=("${SITE_HTTPS_PORT:-443}/tcp")
   fi
-  if [ "${ENABLE_TROJAN:-0}" = "1" ] || [ "${AUTO_ENABLE_TROJAN:-0}" = "1" ]; then
+  if [ "${ENABLE_TROJAN:-0}" = "1" ] || [ "${AUTO_ENABLE_TROJAN:-1}" = "1" ]; then
     local trojan_port
     while IFS= read -r trojan_port; do
       [ -n "$trojan_port" ] && ports+=("${trojan_port}/tcp")
     done < <(domain_trojan_ports)
   fi
-  if [ "${ENABLE_SHADOWSOCKS:-0}" = "1" ]; then
+  if [ "${ENABLE_SHADOWSOCKS:-1}" = "1" ]; then
     ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
   fi
   if [ "${ENABLE_HYSTERIA:-0}" = "1" ]; then
@@ -1108,7 +1108,7 @@ main() {
   echo "  主域名: ${primary}"
   echo "  Web入口: $(web_origin "$primary")/"
   echo "  VLESS Reality端口: $(domain_reality_ports | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep=", " }')"
-  if [ "${ENABLE_TROJAN:-0}" = "1" ] || [ "${AUTO_ENABLE_TROJAN:-0}" = "1" ]; then
+  if [ "${ENABLE_TROJAN:-0}" = "1" ] || [ "${AUTO_ENABLE_TROJAN:-1}" = "1" ]; then
     echo "  Trojan WS TLS端口: $(domain_trojan_ports | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep=", " }')"
   fi
   echo "  订阅转换: $(web_origin "$primary")/sub/"
