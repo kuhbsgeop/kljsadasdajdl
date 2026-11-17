@@ -56,7 +56,7 @@ REALITY_MIN_CLIENT_VERSION="${REALITY_MIN_CLIENT_VERSION:-1.8.2}"
 # share one fingerprint. Keep in sync with install.sh.
 DEFAULT_REALITY_DEST_SITES="www.cloudflare.com,www.microsoft.com,www.apple.com,www.amazon.com,www.github.com,www.bing.com,www.adobe.com,www.mozilla.org,www.ubuntu.com,www.oracle.com"
 REALITY_DEST_SITES="${REALITY_DEST_SITES:-$DEFAULT_REALITY_DEST_SITES}"
-ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-0}"
 ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
 ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
 ADSPOWER_PROXY_LISTEN="${ADSPOWER_PROXY_LISTEN:-0.0.0.0}"
@@ -1345,7 +1345,7 @@ EOF
 }
 
 write_adspower_proxy_optional() {
-  if [ "$(truthy "${ENABLE_ADSPOWER_PROXY:-1}")" != "true" ]; then
+  if [ "$(truthy "${ENABLE_ADSPOWER_PROXY:-0}")" != "true" ]; then
     return 0
   fi
 

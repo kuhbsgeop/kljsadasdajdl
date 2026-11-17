@@ -541,7 +541,7 @@ configure_firewall_ports() {
   if [ "${ENABLE_SHADOWSOCKS:-0}" = "1" ]; then
     ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
   fi
-  if truthy "${ENABLE_ADSPOWER_PROXY:-1}"; then
+  if truthy "${ENABLE_ADSPOWER_PROXY:-0}"; then
     case "${ADSPOWER_PROXY_LISTEN:-0.0.0.0}" in
       127.0.0.1|localhost|::1) ;;
       *) ports+=("${ADSPOWER_PROXY_PORT:-31081}/tcp") ;;
@@ -643,7 +643,7 @@ configure_domains() {
     return
   fi
   log "Configuring domain certificates: ${DOMAIN_NAMES}"
-  if ! (cd "$INSTALL_DIR" && AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-1}" ./scripts/domain-cert.sh --auto); then
+  if ! (cd "$INSTALL_DIR" && AUTO_ENABLE_TROJAN="${AUTO_ENABLE_TROJAN:-0}" ./scripts/domain-cert.sh --auto); then
     if [ "${STRICT_DOMAIN_CERT:-0}" = "1" ]; then
       die "Domain HTTPS setup failed in strict mode. Fix DNS/certificate coverage for every DOMAIN_NAMES entry, then rerun the one-click command."
     fi
@@ -746,21 +746,28 @@ public_ip() {
 }
 
 tty_available() {
-  [ -r /dev/tty ] && [ -w /dev/tty ]
+  # Permission tests are not enough: /dev/tty can be readable/writable yet
+  # fail to open (ENXIO) when there is no controlling terminal (CI,
+  # containers, cron). Actually try opening it.
+  (exec 9<> /dev/tty) 2>/dev/null
 }
 
 tty_print() {
-  printf '%s\n' "$*" > /dev/tty
+  printf '%s\n' "$*" > /dev/tty 2>/dev/null || printf '%s\n' "$*"
 }
 
 tty_prompt() {
   local prompt="$1"
   local default="${2:-}"
   local answer
+  if ! tty_available; then
+    printf '%s' "$default"
+    return 0
+  fi
   if [ -n "$default" ]; then
-    printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
+    printf '%s [%s]: ' "$prompt" "$default" > /dev/tty 2>/dev/null || true
   else
-    printf '%s: ' "$prompt" > /dev/tty
+    printf '%s: ' "$prompt" > /dev/tty 2>/dev/null || true
   fi
   IFS= read -r answer < /dev/tty || answer=""
   printf '%s' "${answer:-$default}"
@@ -811,7 +818,7 @@ run_config_wizard() {
     ENABLE_ACME=1
     acme_email="$(tty_prompt "ACME email for certificate renewal notices" "${ACME_EMAIL:-admin@${domains%%,*}}")"
     ACME_EMAIL="${ACME_EMAIL:-$acme_email}"
-    if tty_yes_no "Enable Trojan TLS automatically after certificate is issued?" "y"; then
+    if tty_yes_no "Enable Trojan TLS automatically after certificate is issued?" "n"; then
       ENABLE_TROJAN=1
       AUTO_ENABLE_TROJAN=1
     fi
@@ -953,7 +960,7 @@ apply_existing_env_overrides() {
       has_install_override USE_DOMAIN_FOR_LINKS || set_env_var USE_DOMAIN_FOR_LINKS "1"
       has_install_override HTTPS_SITE_ENABLE || set_env_var HTTPS_SITE_ENABLE "1"
       has_install_override HTTPS_HTTP_MODE || set_env_var HTTPS_HTTP_MODE "redirect"
-      has_install_override AUTO_ENABLE_TROJAN || set_env_var AUTO_ENABLE_TROJAN "1"
+      has_install_override AUTO_ENABLE_TROJAN || set_env_var AUTO_ENABLE_TROJAN "0"
       has_install_override ENABLE_TROJAN || set_env_var ENABLE_TROJAN "1"
       has_install_override ENABLE_SUBCONVERTER || set_env_var ENABLE_SUBCONVERTER "1"
       has_install_override SUBSCRIPTION_EXPAND_ALIASES || set_env_var SUBSCRIPTION_EXPAND_ALIASES "1"
@@ -1012,7 +1019,7 @@ apply_existing_env_overrides() {
   ensure_env_var SHADOWSOCKS_PORT "8388"
   ensure_env_var TROJAN_PORT "9443"
   ensure_env_var HYSTERIA_PORT "8443"
-  ensure_env_var ENABLE_ADSPOWER_PROXY "1"
+  ensure_env_var ENABLE_ADSPOWER_PROXY "0"
   ensure_env_var ADSPOWER_PROXY_PORT "31081"
   ensure_env_var ADSPOWER_PROXY_REMARK "auto-adspower-mixed-$(env_value ADSPOWER_PROXY_PORT)"
   ensure_env_var ADSPOWER_PROXY_LISTEN "0.0.0.0"
@@ -1140,7 +1147,7 @@ DOKODEMO_NETWORK=${DOKODEMO_NETWORK:-tcp}
 DOKODEMO_FOLLOW_REDIRECT=${DOKODEMO_FOLLOW_REDIRECT:-0}
 DOKODEMO_TPROXY=${DOKODEMO_TPROXY:-off}
 DOKODEMO_FORWARDS=
-ENABLE_ADSPOWER_PROXY=${ENABLE_ADSPOWER_PROXY:-1}
+ENABLE_ADSPOWER_PROXY=${ENABLE_ADSPOWER_PROXY:-0}
 ADSPOWER_PROXY_REMARK=${adspower_proxy_remark_default}
 ADSPOWER_PROXY_LISTEN=${ADSPOWER_PROXY_LISTEN:-0.0.0.0}
 ADSPOWER_PROXY_PORT=${adspower_proxy_port_default}
@@ -1177,7 +1184,7 @@ PUBLIC_IPV4=${PUBLIC_IPV4:-}
 PUBLIC_IPV6=${PUBLIC_IPV6:-}
 STRICT_DOMAIN_CERT=${strict_domain_default}
 USE_DOMAIN_FOR_LINKS=${use_domain_default}
-AUTO_ENABLE_TROJAN=${AUTO_ENABLE_TROJAN:-1}
+AUTO_ENABLE_TROJAN=${AUTO_ENABLE_TROJAN:-0}
 HTTPS_SITE_ENABLE=${https_site_default}
 HTTPS_HTTP_MODE=${https_http_default}
 SITE_HTTPS_PORT=${SITE_HTTPS_PORT:-443}
@@ -1380,7 +1387,10 @@ $(if [ -s "${INSTALL_DIR}/runtime/reality-dest-sites.txt" ]; then awk '{ printf 
     that site, so probes see a normal website.
   - Trojan (WS + TLS) is the backup for clients without REALITY support; its
     WebSocket handshake is easier to fingerprint. Non-Trojan traffic falls back
-    to the masquerade site on :80.
+    to the masquerade site on :80. Trojan auto-enable after certificate
+    issuance is OFF by default (opt in with AUTO_ENABLE_TROJAN=1).
+  - The AdsPower SOCKS5 proxy (plaintext, no encryption) is OFF by default;
+    enable it only if you need it for a fingerprint browser.
   - Shadowsocks-2022 is OFF by default (its traffic pattern is the easiest to
     fingerprint); enable it only if you need it.
   - Hysteria2 (QUIC + TLS 1.3) is an optional second protocol for UDP transport
@@ -1391,7 +1401,7 @@ $(if [ -s "${INSTALL_DIR}/runtime/reality-dest-sites.txt" ]; then awk '{ printf 
     the panel/site to move off Caddy :443 first, so it is not in this install.
 
 6) AdsPower fingerprint browser proxy
-  Enabled: ${ENABLE_ADSPOWER_PROXY:-1}
+  Enabled: ${ENABLE_ADSPOWER_PROXY:-0}
   3X-UI inbound protocol: mixed
   AdsPower proxy type: Socks5
   Host: ${SERVER_ADDR:-your-server}
