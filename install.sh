@@ -545,6 +545,7 @@ download_project() {
     "scripts/safe-update.sh"
     "scripts/subconfig-api.py"
     "scripts/sync_rules_names.py"
+    "scripts/managed-short-link.sh"
     "subconfig-api/Dockerfile"
     "subconfig-api/requirements.txt"
     "scripts/start-services.sh"
@@ -736,6 +737,23 @@ sync_rules_names() {
   log "Syncing node names into the 3.5.yaml rules template."
   if ! (cd "$INSTALL_DIR" && python3 scripts/sync_rules_names.py); then
     log "WARNING: rules-name sync did not complete; the rendered subscription may use placeholder node names. Re-run later with: cd ${INSTALL_DIR} && python3 scripts/sync_rules_names.py"
+  fi
+}
+
+# Create the managed subscription short link (rules + DNS) so the install
+# summary and the terminal menu can show a single copy-paste subscription
+# URL. Runs after the rules-name sync so the first render uses real node
+# names. Warns and continues on failure (the link can be created later).
+create_managed_short_link() {
+  load_env
+  local script="${INSTALL_DIR}/scripts/managed-short-link.sh"
+  if [ ! -f "$script" ]; then
+    log "managed-short-link.sh not found; skipping managed short-link creation."
+    return 0
+  fi
+  log "Creating the managed subscription short link (rules + DNS)."
+  if ! (cd "$INSTALL_DIR" && ./scripts/managed-short-link.sh); then
+    log "WARNING: managed short-link creation did not complete; create it later with: cd ${INSTALL_DIR} && ./scripts/managed-short-link.sh"
   fi
 }
 
@@ -1419,6 +1437,22 @@ write_install_summary() {
   fi
   mkdir -p "${INSTALL_DIR}/runtime"
   chmod 700 "${INSTALL_DIR}/runtime"
+  local short_link_url="(not created; run ./scripts/managed-short-link.sh)"
+  if [ -n "${MANAGED_SHORT_LINK_ID:-}" ]; then
+    if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
+      if [ "${SITE_HTTPS_PORT:-443}" = "443" ]; then
+        short_link_url="https://${SERVER_ADDR:-your-server}/subconfig-api/s/${MANAGED_SHORT_LINK_ID}"
+      else
+        short_link_url="https://${SERVER_ADDR:-your-server}:${SITE_HTTPS_PORT}/subconfig-api/s/${MANAGED_SHORT_LINK_ID}"
+      fi
+    else
+      if [ "${SITE_HTTP_PORT:-80}" = "80" ]; then
+        short_link_url="http://${SERVER_ADDR:-your-server}/subconfig-api/s/${MANAGED_SHORT_LINK_ID}"
+      else
+        short_link_url="http://${SERVER_ADDR:-your-server}:${SITE_HTTP_PORT}/subconfig-api/s/${MANAGED_SHORT_LINK_ID}"
+      fi
+    fi
+  fi
   : > "$panel_urls"
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && [ -n "${DOMAIN_NAMES:-}" ]; then
     printf '%s' "$DOMAIN_NAMES" | tr ',，;； ' '\n' | awk 'NF && !seen[$0]++' | while IFS= read -r domain; do
@@ -1458,6 +1492,9 @@ write_install_summary() {
   Print them:
     cd ${INSTALL_DIR}
     ./scripts/manage.sh links
+
+  Managed subscription (rules + DNS) — copy this URL into your client:
+    ${short_link_url}
 
 5) Default protocol
   VLESS + TCP/Raw + XTLS Vision + REALITY
@@ -1694,6 +1731,7 @@ main() {
   configure_xui_builtin_subscription
   configure_subscription
   sync_rules_names
+  create_managed_short_link
   configure_amazon_global
 
   write_install_summary
