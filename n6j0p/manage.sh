@@ -387,6 +387,7 @@ case "$cmd" in
       ./scripts/xui-builtin-subscription.sh || true
     fi
     ./scripts/subscription.sh
+    ./scripts/managed-short-link.sh || true
     echo "Domain nodes refreshed for /sub/, 3.5.yaml render, and 3X-UI built-in all-nodes subscription."
     ;;
   links)

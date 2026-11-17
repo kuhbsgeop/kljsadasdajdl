@@ -206,6 +206,14 @@ forward_web_url() {
   printf '%s' "$url"
 }
 
+managed_short_link_url() {
+  if [ -n "${MANAGED_SHORT_LINK_ID:-}" ]; then
+    printf '%s/subconfig-api/s/%s' "$(web_origin)" "$MANAGED_SHORT_LINK_ID"
+  else
+    printf '未生成，运行菜单 18 刷新后自动创建'
+  fi
+}
+
 refresh_env() {
   if [ -f .env ]; then
     set -a
@@ -390,6 +398,7 @@ show_status() {
   echo "规则配置: ${blue}$(web_origin)/sub/config/3.5.yaml${plain}"
   echo "规则编辑Token: ${blue}${SUB_CONFIG_ADMIN_TOKEN:-未生成}${plain}"
   echo "3X-UI内置订阅前缀: ${blue}$(web_origin)${XUI_BUILTIN_SUB_PATH:-/xui-sub/}${plain}  监听: ${cyan}${XUI_BUILTIN_SUB_LISTEN}:${XUI_BUILTIN_SUB_PORT}${plain}"
+  echo "规则订阅链接【带分流规则 + DNS，直接复制到客户端】: ${blue}$(managed_short_link_url)${plain}"
   if [ -s runtime/amazon-global.txt ]; then
     echo "亚马逊住宅IP全局订阅:"
     awk '/^Subscription URL:/{show=1; next} show && /^[[:space:]]+https?:/{print "  " $0; exit}' runtime/amazon-global.txt

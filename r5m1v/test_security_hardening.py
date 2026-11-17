@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 INSTALL = (ROOT / "install.sh").read_text(encoding="utf-8")
 APPLY_PRESETS = (ROOT / "n6j0p" / "apply-presets.sh").read_text(encoding="utf-8")
 MANAGE = (ROOT / "n6j0p" / "manage.sh").read_text(encoding="utf-8")
+MENU = (ROOT / "n6j0p" / "menu.sh").read_text(encoding="utf-8")
+MANAGED_SHORT_LINK = (ROOT / "n6j0p" / "managed-short-link.sh").read_text(encoding="utf-8")
 SAFE_UPDATE = (ROOT / "n6j0p" / "safe-update.sh").read_text(encoding="utf-8")
 START_SERVICES = (ROOT / "n6j0p" / "start-services.sh").read_text(encoding="utf-8")
 PROTOCOL_GUARD = (ROOT / "n6j0p" / "protocol-guard.sh").read_text(encoding="utf-8")
@@ -335,6 +337,37 @@ class NodeSecurityTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertIn(text, INSTALL)
+
+    def test_install_creates_managed_short_link_after_rules_sync(self):
+        self.assertIn("create_managed_short_link() {", INSTALL)
+        main_body = INSTALL.rsplit("main() {", 1)[1]
+        self.assertLess(
+            main_body.index("  sync_rules_names"),
+            main_body.index("  create_managed_short_link"),
+        )
+        self.assertIn("./scripts/managed-short-link.sh", INSTALL)
+        self.assertIn('"scripts/managed-short-link.sh"', INSTALL)
+
+    def test_install_summary_shows_managed_short_link(self):
+        self.assertIn("Managed subscription (rules + DNS)", INSTALL)
+        self.assertIn("short_link_url", INSTALL)
+        self.assertIn("MANAGED_SHORT_LINK_ID", INSTALL)
+
+    def test_menu_shows_managed_short_link(self):
+        self.assertIn("managed_short_link_url() {", MENU)
+        self.assertIn("规则订阅链接", MENU)
+        self.assertIn("managed_short_link_url", MENU)
+
+    def test_refresh_links_creates_short_link(self):
+        refresh = MANAGE.split("refresh-links)", 1)[1].split(";;", 1)[0]
+        self.assertIn("./scripts/managed-short-link.sh", refresh)
+
+    def test_managed_short_link_script_is_idempotent(self):
+        self.assertIn("MANAGED_SHORT_LINK_ID", MANAGED_SHORT_LINK)
+        self.assertIn("/shorten?token=", MANAGED_SHORT_LINK)
+        self.assertIn('"managed": true', MANAGED_SHORT_LINK)
+        self.assertIn("set_env_var MANAGED_SHORT_LINK_ID", MANAGED_SHORT_LINK)
+        self.assertIn("runtime/managed-short-link.txt", MANAGED_SHORT_LINK)
 
 
 if __name__ == "__main__":
