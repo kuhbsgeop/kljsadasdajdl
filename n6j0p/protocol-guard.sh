@@ -16,7 +16,7 @@ PANEL_PORT="${PANEL_PORT:-2053}"
 WEB_BASE_PATH="${WEB_BASE_PATH:-panel}"
 PROTOCOL_GUARD_ACTION="${PROTOCOL_GUARD_ACTION:-disable}"
 SAFE_PROTOCOLS="${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}"
-REQUIRE_SECURE_TRANSPORT="${REQUIRE_SECURE_TRANSPORT:-0}"
+REQUIRE_SECURE_TRANSPORT="${REQUIRE_SECURE_TRANSPORT:-1}"
 ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
 ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
 ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
@@ -54,6 +54,11 @@ has_secure_transport() {
   local security="$2"
   case "$protocol" in
     tunnel|dokodemo-door)
+      return 0
+      ;;
+    # Shadowsocks-2022 (AEAD) and WireGuard (Noise) encrypt at the protocol
+    # layer and have no TLS setting, so security "none" is not plaintext.
+    shadowsocks|wireguard)
       return 0
       ;;
   esac

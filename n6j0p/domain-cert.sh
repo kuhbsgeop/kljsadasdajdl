@@ -599,7 +599,7 @@ configure_firewall_ports() {
       [ -n "$trojan_port" ] && ports+=("${trojan_port}/tcp")
     done < <(domain_trojan_ports)
   fi
-  if [ "${ENABLE_SHADOWSOCKS:-1}" = "1" ]; then
+  if [ "${ENABLE_SHADOWSOCKS:-0}" = "1" ]; then
     ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
   fi
   if [ "${ENABLE_HYSTERIA:-0}" = "1" ]; then

@@ -70,6 +70,7 @@ Commands:
   protocol-guard Disable or delete unsafe inbound protocols
   forward        Add/update a dokodemo-door/tunnel port forward
   forward-web    Open the port-forward web UI with token auto-filled
+  security-check Run the read-only security self-check (PASS/WARN/FAIL)
 
 Open ports examples:
   ./scripts/manage.sh open-ports 80 443 8443-8450
@@ -290,6 +291,12 @@ configure_forward() {
   validate_no_newline "target address" "$target_addr"
   validate_no_newline "listen address" "$listen_addr"
   network="$(normalize_network "$network")"
+  case "$listen_addr" in
+    0.0.0.0|::)
+      echo "WARNING: This forward listens on ${listen_addr}: it is an unauthenticated public forwarder." >&2
+      echo "WARNING: Anyone on the internet can use it to reach ${target_addr}:${target_port}. Use 127.0.0.1 unless the forward is meant to be public." >&2
+      ;;
+  esac
   case "$follow_redirect" in
     y|Y|yes|YES|1|true|TRUE) follow_redirect=1 ;;
     *) follow_redirect=0 ;;
@@ -458,6 +465,12 @@ case "$cmd" in
     ;;
   network-check)
     ./scripts/network-check.sh
+    ;;
+  security-check)
+    # The connector push cannot carry file modes, so a raw checkout may hold
+    # this script without the executable bit; make it executable here.
+    chmod +x ./scripts/security-check.sh 2>/dev/null || true
+    ./scripts/security-check.sh
     ;;
   adspower-proxy|adsproxy|fingerprint-proxy)
     configure_adspower_proxy

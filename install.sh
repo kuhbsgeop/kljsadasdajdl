@@ -4,6 +4,11 @@ set -Eeuo pipefail
 REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/kuhbsgeop/kljsadasdajdl/main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/3xui-selfhost-kit}"
 
+# Default REALITY dest/SNI rotation list: each node gets a different
+# high-traffic site (dest is "<site>:443", SNI is the site) so nodes do not
+# share one fingerprint. Keep in sync with n6j0p/apply-presets.sh.
+DEFAULT_REALITY_DEST_SITES="www.cloudflare.com,www.microsoft.com,www.apple.com,www.amazon.com,www.github.com,www.bing.com,www.adobe.com,www.mozilla.org,www.ubuntu.com,www.oracle.com"
+
 INSTALL_ENV_OVERRIDE_KEYS=(
   PANEL_PORT PANEL_LISTEN_IP WEB_BASE_PATH
   DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
@@ -11,7 +16,7 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   ENABLE_ACME ACME_EMAIL ACME_SERVER ACME_FALLBACK_SERVER REQUIRE_DOMAIN_ORIGIN PUBLIC_IPV4 PUBLIC_IPV6 STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
   ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA ENABLE_AMAZON_GLOBAL
   AMAZON_GLOBAL_TOKEN AMAZON_GLOBAL_NODE_NAME AMAZON_GLOBAL_GROUP_NAME AMAZON_GLOBAL_TUN_MTU AMAZON_GLOBAL_PUBLIC_ORIGIN
-  REALITY_PORT REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X REALITY_MIN_CLIENT_VERSION
+  REALITY_PORT REALITY_DEST_SITES REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X REALITY_MIN_CLIENT_VERSION
   TLS_SERVER_NAME TLS_CERT_FILE TLS_KEY_FILE
   TROJAN_PORT SHADOWSOCKS_PORT HYSTERIA_PORT
   ENABLE_DOKODEMO DOKODEMO_LISTEN DOKODEMO_PORT DOKODEMO_TARGET_ADDRESS DOKODEMO_TARGET_PORT
@@ -22,6 +27,7 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   ENABLE_RUSTDESK RUSTDESK_IMAGE RUSTDESK_DATA_DIR RUSTDESK_SERVER
   XUI_BUILTIN_SUB_ENABLE XUI_BUILTIN_ALL_NODES XUI_BUILTIN_JSON_ENABLE XUI_BUILTIN_CLASH_ENABLE
   ENABLE_PROTOCOL_GUARD PROTOCOL_GUARD_ACTION SAFE_PROTOCOLS REQUIRE_SECURE_TRANSPORT
+  ENABLE_SSH_HARDENING ENABLE_FAIL2BAN ENABLE_UNATTENDED_UPGRADES
 )
 
 for key in "${INSTALL_ENV_OVERRIDE_KEYS[@]}"; do
@@ -237,6 +243,214 @@ ensure_docker() {
   docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is still unavailable after Docker install."
 }
 
+# True when the given authorized_keys file holds at least one plausible key
+# (key type followed by a base64 blob; option prefixes are tolerated).
+user_has_ssh_key() {
+  local keys_file="$1"
+  [ -s "$keys_file" ] || return 1
+  grep -qE '(^|[[:space:]])(ssh|ecdsa|sk-ssh)-[A-Za-z0-9-]+(@[A-Za-z0-9.-]+)?[[:space:]]+[A-Za-z0-9+/=]{20,}' "$keys_file" 2>/dev/null
+}
+
+harden_ssh() {
+  if [ "${ENABLE_SSH_HARDENING:-1}" != "1" ]; then
+    log "SSH hardening is disabled (ENABLE_SSH_HARDENING=${ENABLE_SSH_HARDENING})."
+    return 0
+  fi
+  if ! command -v sshd >/dev/null 2>&1 && [ ! -f /etc/ssh/sshd_config ]; then
+    log "sshd is not installed; skipping SSH hardening."
+    return 0
+  fi
+
+  local ssh_dir="${SSH_CONFIG_DIR:-/etc/ssh}"
+  local conf_dir="${ssh_dir}/sshd_config.d"
+  local conf_file="${conf_dir}/00-3xui-hardening.conf"
+  local sshd_config="${ssh_dir}/sshd_config"
+
+  mkdir -p "$conf_dir"
+
+  # Only disable password login when someone can still get in with a key.
+  # Otherwise a password-only install would lock its owner out.
+  # ROOT_AUTHORIZED_KEYS is a test hook; it defaults to the real path.
+  local root_keys="${ROOT_AUTHORIZED_KEYS:-/root/.ssh/authorized_keys}"
+  local has_key=0
+  if user_has_ssh_key "$root_keys"; then
+    has_key=1
+  elif [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && user_has_ssh_key "/home/${SUDO_USER}/.ssh/authorized_keys"; then
+    has_key=1
+  fi
+
+  local backup=""
+  if [ -f "$conf_file" ]; then
+    backup="${conf_file}.bak"
+    cp -p "$conf_file" "$backup"
+  fi
+
+  {
+    echo "# Managed by 3x-ui selfhost kit (install.sh harden_ssh)."
+    echo "# Key-only SSH login; see SECURITY.md."
+    echo "PubkeyAuthentication yes"
+    echo "MaxAuthTries 3"
+    echo "LoginGraceTime 30"
+    if [ "$has_key" = "1" ]; then
+      echo "PasswordAuthentication no"
+      echo "KbdInteractiveAuthentication no"
+      echo "PermitRootLogin prohibit-password"
+    fi
+  } > "$conf_file"
+  chmod 644 "$conf_file"
+
+  # sshd only reads the drop-in when the main config includes it (Debian 12+
+  # and Ubuntu 22.04+ do by default). Add the include at the top when missing
+  # so our settings win (sshd uses the first value it sees).
+  local sshd_config_backed_up=0
+  if [ -f "$sshd_config" ] && ! grep -qE '^[[:space:]]*Include[[:space:]]+.*sshd_config\.d' "$sshd_config"; then
+    cp -p "$sshd_config" "${sshd_config}.bak-3xui-kit"
+    sshd_config_backed_up=1
+    local tmp_config
+    tmp_config="$(mktemp)"
+    {
+      echo "Include ${conf_dir}/*.conf"
+      cat "$sshd_config"
+    } > "$tmp_config"
+    mv "$tmp_config" "$sshd_config"
+    log "Added sshd_config.d include to ${sshd_config} (backup: ${sshd_config}.bak-3xui-kit)."
+  fi
+
+  if command -v sshd >/dev/null 2>&1; then
+    if ! sshd -t 2>/dev/null; then
+      log "sshd -t failed after writing ${conf_file}; restoring previous state."
+      if [ -n "$backup" ]; then
+        mv "$backup" "$conf_file"
+      else
+        rm -f "$conf_file"
+      fi
+      if [ "$sshd_config_backed_up" = "1" ]; then
+        mv "${sshd_config}.bak-3xui-kit" "$sshd_config"
+      fi
+      return 0
+    fi
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || log "Could not reload sshd; restart it manually to apply SSH hardening."
+  fi
+
+  if [ "$has_key" = "1" ]; then
+    log "SSH hardened: key-only login, max 3 auth tries, 30s grace time."
+  else
+    log "WARNING: No SSH public key found for root; password login was NOT disabled."
+    log "WARNING: Add your public key to /root/.ssh/authorized_keys, verify key login in a second session, then re-run the installer to disable password login."
+  fi
+}
+
+install_fail2ban() {
+  if [ "${ENABLE_FAIL2BAN:-1}" != "1" ]; then
+    log "fail2ban is disabled (ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN})."
+    return 0
+  fi
+  if ! command -v ufw >/dev/null 2>&1; then
+    log "fail2ban skipped: ufw is not installed (the sshd jail bans through ufw)."
+    return 0
+  fi
+  if ! command -v fail2ban-client >/dev/null 2>&1; then
+    if ! command -v apt-get >/dev/null 2>&1 && ! command -v dnf >/dev/null 2>&1 && ! command -v yum >/dev/null 2>&1 && ! command -v apk >/dev/null 2>&1; then
+      log "fail2ban skipped: no supported package manager found."
+      return 0
+    fi
+    log "Installing fail2ban."
+    if ! install_pkg fail2ban; then
+      log "fail2ban install failed; continuing without it."
+      return 0
+    fi
+  fi
+
+  local jail_dir="${FAIL2BAN_JAIL_DIR:-/etc/fail2ban/jail.d}"
+  mkdir -p "$jail_dir"
+  cat > "${jail_dir}/3xui-kit-sshd.conf" <<'EOF'
+# Managed by 3x-ui selfhost kit (install.sh install_fail2ban).
+[sshd]
+enabled = true
+backend = systemd
+banaction = ufw
+maxretry = 5
+bantime = 1h
+findtime = 10m
+EOF
+
+  if ! fail2ban-client -t >/dev/null 2>&1; then
+    log "fail2ban config test failed; removing the kit jail and continuing without it."
+    rm -f "${jail_dir}/3xui-kit-sshd.conf"
+    return 0
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable --now fail2ban >/dev/null 2>&1 || log "fail2ban installed but could not be started; check: systemctl status fail2ban"
+  fi
+  if fail2ban-client status sshd >/dev/null 2>&1; then
+    log "fail2ban is running with the sshd jail (ufw ban, 5 failures in 10 min -> 1h ban)."
+  else
+    log "fail2ban sshd jail is not active yet; check: fail2ban-client status"
+  fi
+}
+
+enable_unattended_upgrades() {
+  if [ "${ENABLE_UNATTENDED_UPGRADES:-1}" != "1" ]; then
+    log "Unattended upgrades are disabled (ENABLE_UNATTENDED_UPGRADES=${ENABLE_UNATTENDED_UPGRADES})."
+    return 0
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log "Unattended upgrades skipped: not an apt-based system."
+    return 0
+  fi
+  if ! dpkg -s unattended-upgrades >/dev/null 2>&1; then
+    log "Installing unattended-upgrades."
+    if ! install_pkg unattended-upgrades; then
+      log "unattended-upgrades install failed; continuing without it."
+      return 0
+    fi
+  fi
+  local auto_upgrades_file="${APT_AUTO_UPGRADES_FILE:-/etc/apt/apt.conf.d/20auto-upgrades}"
+  mkdir -p "$(dirname "$auto_upgrades_file")"
+  cat > "$auto_upgrades_file" <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+  log "Unattended security updates enabled (APT::Periodic::Unattended-Upgrade)."
+}
+
+harden_file_permissions() {
+  cd "$INSTALL_DIR"
+  if [ -f .env ]; then
+    chmod 600 .env
+  fi
+  if [ -f data/db/x-ui.db ]; then
+    chmod 600 data/db/x-ui.db
+    chmod 600 data/db/x-ui.db-shm data/db/x-ui.db-wal 2>/dev/null || true
+    log "Panel database permissions set to 600."
+  fi
+  local rustdesk_dir="${RUSTDESK_DATA_DIR:-/opt/rustdesk-server/data}"
+  if [ -d "$rustdesk_dir" ]; then
+    chmod 600 "$rustdesk_dir"/*.sqlite3 "$rustdesk_dir"/*.sqlite3-shm "$rustdesk_dir"/*.sqlite3-wal 2>/dev/null || true
+  fi
+}
+
+run_security_check() {
+  # The connector push cannot carry file modes, so a raw checkout may hold
+  # this script without the executable bit; make it executable here.
+  chmod +x "${INSTALL_DIR}/scripts/security-check.sh" 2>/dev/null || true
+  if [ -x "${INSTALL_DIR}/scripts/security-check.sh" ]; then
+    log "Running post-install security self-check."
+    if (cd "$INSTALL_DIR" && ./scripts/security-check.sh); then
+      log "Security self-check passed."
+    else
+      log "WARNING: Security self-check reported failures; review the lines above."
+      log "WARNING: Re-run any time with: cd ${INSTALL_DIR} && ./scripts/manage.sh security-check"
+    fi
+  else
+    log "Security self-check script is missing; skipping."
+  fi
+}
+
 repo_source_path() {
   case "$1" in
     scripts/*) printf 'n6j0p/%s' "${1#scripts/}" ;;
@@ -268,6 +482,7 @@ download_project() {
     "scripts/xui-builtin-subscription.sh"
     "scripts/mask-site.sh"
     "scripts/protocol-guard.sh"
+    "scripts/security-check.sh"
     "scripts/open-ports.sh"
     "scripts/amazon-global.sh"
     "scripts/amazon-global.py"
@@ -323,7 +538,7 @@ configure_firewall_ports() {
   if [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ]; then
     ports+=("${PANEL_PORT:-2053}/tcp")
   fi
-  if [ "${ENABLE_SHADOWSOCKS:-1}" = "1" ]; then
+  if [ "${ENABLE_SHADOWSOCKS:-0}" = "1" ]; then
     ports+=("${SHADOWSOCKS_PORT:-8388}/tcp" "${SHADOWSOCKS_PORT:-8388}/udp")
   fi
   if truthy "${ENABLE_ADSPOWER_PROXY:-1}"; then
@@ -346,7 +561,7 @@ configure_firewall_ports() {
     while IFS= read -r entry; do
       [ -n "$entry" ] || continue
       IFS=',' read -r port _target _target_port network listen _rest <<< "$entry"
-      listen="${listen:-0.0.0.0}"
+      listen="${listen:-127.0.0.1}"
       network="${network:-tcp}"
       if [ "$listen" = "127.0.0.1" ] || [ "$listen" = "localhost" ]; then
         continue
@@ -357,7 +572,7 @@ configure_firewall_ports() {
         udp) ports+=("${port}/udp") ;;
         *) ports+=("${port}/tcp" "${port}/udp") ;;
       esac
-    done < <(printf '%s' "$DOKODEMO_FORWARDS" | tr ';' '\n')
+    done < <(printf '%s\n' "$DOKODEMO_FORWARDS" | tr ';' '\n')
   fi
   if [ "${ENABLE_DOKODEMO:-0}" = "1" ] && [ "${DOKODEMO_LISTEN:-127.0.0.1}" != "127.0.0.1" ] && [ "${DOKODEMO_LISTEN:-127.0.0.1}" != "localhost" ]; then
     case "${DOKODEMO_NETWORK:-tcp}" in
@@ -368,11 +583,26 @@ configure_firewall_ports() {
   fi
 
   if command -v ufw >/dev/null 2>&1; then
+    # Never lock out the SSH session running the installer: allow the
+    # effective sshd port in addition to 22 before enabling the firewall.
+    local sshd_port
+    sshd_port="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }')"
+    if [ -n "${sshd_port:-}" ] && [ "$sshd_port" != "22" ]; then
+      ports+=("${sshd_port}/tcp")
+    fi
     local p
     for p in "${ports[@]}"; do
       ufw allow "$p" >/dev/null 2>&1 || true
     done
-    log "Firewall rules ensured with ufw: ${ports[*]}"
+    ufw default deny incoming >/dev/null 2>&1 || true
+    ufw default allow outgoing >/dev/null 2>&1 || true
+    ufw --force enable >/dev/null 2>&1 || true
+    if ufw status 2>/dev/null | head -n 1 | grep -qi "Status: active"; then
+      log "Firewall enabled with ufw (default deny incoming): ${ports[*]}"
+    else
+      log "WARNING: ufw rules were added but ufw is NOT active; the firewall is not enforcing."
+      log "WARNING: Enable it manually with: sudo ufw enable (after confirming SSH port ${sshd_port:-22} is allowed)."
+    fi
   elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
     local p proto port
     for p in "${ports[@]}"; do
@@ -608,10 +838,8 @@ run_config_wizard() {
   PANEL_PORT="${PANEL_PORT:-$(tty_prompt "Panel port" "$default_panel_port")}"
   WEB_BASE_PATH="${WEB_BASE_PATH:-$(tty_prompt "Panel random path, without leading slash" "p$(random_hex 9)")}"
   REALITY_PORT="${REALITY_PORT:-$(tty_prompt "VLESS REALITY public port" "443")}"
-  target="$(tty_prompt "REALITY target" "${REALITY_TARGET:-www.cloudflare.com:443}")"
-  REALITY_TARGET="${REALITY_TARGET:-$target}"
-  server_names="$(tty_prompt "REALITY server names, comma-separated" "${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}")"
-  REALITY_SERVER_NAMES="${REALITY_SERVER_NAMES:-$server_names}"
+  dest_sites="$(tty_prompt "REALITY dest sites, comma-separated (one per node, rotated)" "${REALITY_DEST_SITES:-$DEFAULT_REALITY_DEST_SITES}")"
+  REALITY_DEST_SITES="${REALITY_DEST_SITES:-$dest_sites}"
 
   if tty_yes_no "Enable Hysteria2 now? It needs a real TLS certificate for best security" "n"; then
     ENABLE_HYSTERIA=1
@@ -627,7 +855,7 @@ run_config_wizard() {
     TLS_KEY_FILE="${TLS_KEY_FILE:-$(tty_prompt "TLS key path inside container/host" "${TLS_KEY_FILE:-}")}"
   fi
 
-  if tty_yes_no "Enable Shadowsocks 2022 now?" "y"; then
+  if tty_yes_no "Enable Shadowsocks 2022 now? (not recommended: easier to fingerprint than REALITY)" "n"; then
     ENABLE_SHADOWSOCKS=1
     SHADOWSOCKS_PORT="${SHADOWSOCKS_PORT:-$(tty_prompt "Shadowsocks TCP/UDP port" "8388")}"
   else
@@ -771,6 +999,7 @@ apply_existing_env_overrides() {
   ensure_env_var REALITY_PORT "443"
   ensure_env_var REALITY_TARGET "www.cloudflare.com:443"
   ensure_env_var REALITY_SERVER_NAMES "www.cloudflare.com,cloudflare.com"
+  ensure_env_var REALITY_DEST_SITES "$DEFAULT_REALITY_DEST_SITES"
   ensure_env_var REALITY_SPIDER_X "/"
   ensure_env_var REALITY_MIN_CLIENT_VERSION "1.8.2"
   ensure_env_var ENABLE_PRESETS "1"
@@ -779,7 +1008,7 @@ apply_existing_env_overrides() {
   ensure_env_var AMAZON_GLOBAL_NODE_NAME "Amazon住宅全局节点"
   ensure_env_var AMAZON_GLOBAL_GROUP_NAME "Amazon住宅IP全局代理"
   ensure_env_var AMAZON_GLOBAL_TUN_MTU "1400"
-  ensure_env_var ENABLE_SHADOWSOCKS "1"
+  ensure_env_var ENABLE_SHADOWSOCKS "0"
   ensure_env_var SHADOWSOCKS_PORT "8388"
   ensure_env_var TROJAN_PORT "9443"
   ensure_env_var HYSTERIA_PORT "8443"
@@ -793,6 +1022,9 @@ apply_existing_env_overrides() {
   ensure_env_var SAFE_PROTOCOLS "vless,trojan,shadowsocks,wireguard,hysteria,tunnel"
   ensure_env_var PROTOCOL_GUARD_ACTION "disable"
   ensure_env_var ENABLE_PROTOCOL_GUARD "1"
+  ensure_env_var ENABLE_SSH_HARDENING "1"
+  ensure_env_var ENABLE_FAIL2BAN "1"
+  ensure_env_var ENABLE_UNATTENDED_UPGRADES "1"
   ensure_env_var SITE_HTTP_PORT "80"
   ensure_env_var ENABLE_MASK_SITE "1"
   ensure_env_var SUBCONVERTER_IMAGE "tindy2013/subconverter:latest"
@@ -876,6 +1108,7 @@ SERVER_ADDR=${SERVER_ADDR:-${server_addr_default}}
 REALITY_PORT=${REALITY_PORT:-443}
 REALITY_TARGET=${REALITY_TARGET:-www.cloudflare.com:443}
 REALITY_SERVER_NAMES=${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
+REALITY_DEST_SITES=${REALITY_DEST_SITES:-$DEFAULT_REALITY_DEST_SITES}
 REALITY_SPIDER_X=${REALITY_SPIDER_X:-/}
 REALITY_MIN_CLIENT_VERSION=${REALITY_MIN_CLIENT_VERSION:-1.8.2}
 
@@ -890,7 +1123,7 @@ ALL_NODES_SUB_ID=${all_nodes_sub_id}
 DEFAULT_SUB_ID=${default_sub_id}
 ENABLE_HYSTERIA=${ENABLE_HYSTERIA:-0}
 ENABLE_TROJAN=${ENABLE_TROJAN:-0}
-ENABLE_SHADOWSOCKS=${ENABLE_SHADOWSOCKS:-1}
+ENABLE_SHADOWSOCKS=${ENABLE_SHADOWSOCKS:-0}
 ALLOW_SELF_SIGNED_TLS=${ALLOW_SELF_SIGNED_TLS:-0}
 TLS_CERT_FILE=${TLS_CERT_FILE:-}
 TLS_KEY_FILE=${TLS_KEY_FILE:-}
@@ -917,7 +1150,10 @@ ADSPOWER_PROXY_UDP=${ADSPOWER_PROXY_UDP:-0}
 SAFE_PROTOCOLS=${SAFE_PROTOCOLS:-vless,trojan,shadowsocks,wireguard,hysteria,tunnel}
 PROTOCOL_GUARD_ACTION=${PROTOCOL_GUARD_ACTION:-disable}
 ENABLE_PROTOCOL_GUARD=${ENABLE_PROTOCOL_GUARD:-1}
-REQUIRE_SECURE_TRANSPORT=${REQUIRE_SECURE_TRANSPORT:-${https_site_default}}
+REQUIRE_SECURE_TRANSPORT=${REQUIRE_SECURE_TRANSPORT:-1}
+ENABLE_SSH_HARDENING=${ENABLE_SSH_HARDENING:-1}
+ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN:-1}
+ENABLE_UNATTENDED_UPGRADES=${ENABLE_UNATTENDED_UPGRADES:-1}
 
 CHAIN_ENABLED=${CHAIN_ENABLED:-0}
 CHAIN_MODE=${CHAIN_MODE:-manual}
@@ -1132,9 +1368,27 @@ write_install_summary() {
 5) Default protocol
   VLESS + TCP/Raw + XTLS Vision + REALITY
   Port: ${REALITY_PORT:-443}
-  Reality target: ${REALITY_TARGET:-www.cloudflare.com:443}
-  Reality server names: ${REALITY_SERVER_NAMES:-www.cloudflare.com,cloudflare.com}
+  Reality dest sites (one per node, rotated in order; dest is site:443, SNI is the site):
+$(printf '%s' "${REALITY_DEST_SITES:-$DEFAULT_REALITY_DEST_SITES}" | tr ',' '\n' | sed 's/^/    /')
+  Per-node dest (nodes created by this install):
+$(if [ -s "${INSTALL_DIR}/runtime/reality-dest-sites.txt" ]; then awk '{ printf "    %s (port %s): %s\n", $1, $2, $3 }' "${INSTALL_DIR}/runtime/reality-dest-sites.txt"; else echo "    (no new REALITY nodes created; existing nodes keep their dest)"; fi)
   Reality minimum client version: ${REALITY_MIN_CLIENT_VERSION:-1.8.2} (Mihomo compatible)
+
+  Node security model (REALITY is the primary protocol):
+  - VLESS + REALITY is the default node: its TLS handshake is indistinguishable
+    from a real visit to the dest site, and non-REALITY traffic is forwarded to
+    that site, so probes see a normal website.
+  - Trojan (WS + TLS) is the backup for clients without REALITY support; its
+    WebSocket handshake is easier to fingerprint. Non-Trojan traffic falls back
+    to the masquerade site on :80.
+  - Shadowsocks-2022 is OFF by default (its traffic pattern is the easiest to
+    fingerprint); enable it only if you need it.
+  - Hysteria2 (QUIC + TLS 1.3) is an optional second protocol for UDP transport
+    diversity; it is OFF by default.
+  - VMess and plaintext (no TLS/REALITY) nodes are never generated; the
+    protocol guard disables them if they appear.
+  - REALITY on port 443 is the recommended next step (stealthiest); it needs
+    the panel/site to move off Caddy :443 first, so it is not in this install.
 
 6) AdsPower fingerprint browser proxy
   Enabled: ${ENABLE_ADSPOWER_PROXY:-1}
@@ -1264,6 +1518,24 @@ write_install_summary() {
     $([ "${HTTPS_SITE_ENABLE:-0}" = "1" ] && printf 'https://%s/subscriptions/%s.yaml' "${SERVER_ADDR:-your-server}" "${AMAZON_GLOBAL_TOKEN:-not-generated}" || printf 'http://%s:%s/subscriptions/%s.yaml' "${SERVER_ADDR:-your-server}" "${SITE_HTTP_PORT:-80}" "${AMAZON_GLOBAL_TOKEN:-not-generated}")
   Local handoff record:
     ${INSTALL_DIR}/runtime/amazon-global.txt
+
+16) Security hardening checklist
+  Applied automatically by the installer:
+    - SSH key-only login (only when a root public key was present at install time)
+    - fail2ban sshd jail (ufw ban, 5 failures in 10 min -> 1h ban)
+    - unattended security updates
+    - UFW enabled with default-deny incoming
+    - .env and panel database permissions set to 600
+    - container core dumps disabled
+  Still needs you:
+    - Enable two-factor authentication in the 3x-ui panel (panel settings).
+    - Verify SSH key login works in a second session before closing this one.
+    - If you created a public (0.0.0.0) tunnel forward, remember it has no
+      authentication: anyone on the internet can use it. Prefer 127.0.0.1
+      unless the forward is meant to be public.
+  Re-check any time:
+    cd ${INSTALL_DIR}
+    ./scripts/manage.sh security-check
 EOF
   chmod 600 "$summary"
 }
@@ -1297,6 +1569,9 @@ main() {
   load_env
   generate_mask_site
   configure_firewall_ports
+  harden_ssh
+  install_fail2ban
+  enable_unattended_upgrades
   compose_up
   if [ "${ENABLE_RUSTDESK:-1}" = "1" ]; then
     log "Installing RustDesk Server OSS."
@@ -1305,6 +1580,7 @@ main() {
   install_systemd_autostart
   wait_panel_db
   configure_panel
+  harden_file_permissions
   start_mask_site
   configure_domains
 
@@ -1323,6 +1599,7 @@ main() {
 
   write_install_summary
   print_install_summary
+  run_security_check
   if [ "${MENU_AFTER_INSTALL:-1}" = "1" ] && tty_available; then
     log "Opening terminal menu. You can run it later with: 3xui-kit"
     "${INSTALL_DIR}/scripts/menu.sh"

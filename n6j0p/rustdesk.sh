@@ -96,7 +96,7 @@ install_server() {
       && [ "$(docker inspect -f '{{.State.Running}}' hbbs 2>/dev/null || true)" = "true" ] \
       && [ "$(docker inspect -f '{{.State.Running}}' hbbr 2>/dev/null || true)" = "true" ]; then
       chmod 600 "${RUSTDESK_DATA_DIR}/id_ed25519" "${RUSTDESK_DATA_DIR}/id_ed25519.pub" 2>/dev/null || true
-      chmod 600 "${RUSTDESK_DATA_DIR}"/*.sqlite3 2>/dev/null || true
+      chmod 600 "${RUSTDESK_DATA_DIR}"/*.sqlite3 "${RUSTDESK_DATA_DIR}"/*.sqlite3-shm "${RUSTDESK_DATA_DIR}"/*.sqlite3-wal 2>/dev/null || true
       write_config
       log "Ready. Also open these ports in the VPS provider security group: TCP 21115-21119, UDP 21116."
       return 0
