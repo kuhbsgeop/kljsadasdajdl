@@ -23,7 +23,7 @@ fi
 
 XUI_CONTAINER="${XUI_CONTAINER:-3xui}"
 PANEL_PORT="${PANEL_PORT:-2053}"
-PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-127.0.0.1}"
+PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-0.0.0.0}"
 WEB_BASE_PATH="${WEB_BASE_PATH:-panel}"
 SERVER_ADDR="${SERVER_ADDR:-your-server}"
 REALITY_PORT="${REALITY_PORT:-443}"
@@ -49,7 +49,7 @@ XUI_BUILTIN_JSON_PATH="${XUI_BUILTIN_JSON_PATH:-}"
 XUI_BUILTIN_CLASH_PATH="${XUI_BUILTIN_CLASH_PATH:-}"
 SERVER_ALIASES="${SERVER_ALIASES:-}"
 PENDING_DOMAIN_NAMES="${PENDING_DOMAIN_NAMES:-}"
-ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-1}"
+ENABLE_ADSPOWER_PROXY="${ENABLE_ADSPOWER_PROXY:-0}"
 ADSPOWER_PROXY_PORT="${ADSPOWER_PROXY_PORT:-31081}"
 ADSPOWER_PROXY_REMARK="${ADSPOWER_PROXY_REMARK:-auto-adspower-mixed-${ADSPOWER_PROXY_PORT}}"
 ADSPOWER_PROXY_LISTEN="${ADSPOWER_PROXY_LISTEN:-0.0.0.0}"
@@ -156,7 +156,7 @@ autostart_status() {
 panel_url() {
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     printf '%s/%s/' "$(web_origin)" "${WEB_BASE_PATH#/}"
-  elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+  elif [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "::" ]; then
     printf 'http://%s:%s/%s/' "$SERVER_ADDR" "$PANEL_PORT" "${WEB_BASE_PATH#/}"
   else
     tunnel_url
@@ -166,7 +166,7 @@ panel_url() {
 panel_access_note() {
   if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
     printf 'Domain HTTPS mode is enabled; open the panel directly with the domain URL.'
-  elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+  elif [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "::" ]; then
     printf 'Public IP HTTP mode is enabled; open the panel directly with the IP URL.'
   else
     printf 'Panel is bound to localhost. Change PANEL_LISTEN_IP to 0.0.0.0 or enable domain HTTPS mode for direct public access.'
