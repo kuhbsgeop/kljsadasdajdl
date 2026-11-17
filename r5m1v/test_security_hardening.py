@@ -14,6 +14,7 @@ START_SERVICES = (ROOT / "n6j0p" / "start-services.sh").read_text(encoding="utf-
 PROTOCOL_GUARD = (ROOT / "n6j0p" / "protocol-guard.sh").read_text(encoding="utf-8")
 ONE_CLICK = (ROOT / "one-click.sh").read_text(encoding="utf-8")
 DOMAIN_CERT = (ROOT / "n6j0p" / "domain-cert.sh").read_text(encoding="utf-8")
+XUI_BUILTIN_SUB = (ROOT / "n6j0p" / "xui-builtin-subscription.sh").read_text(encoding="utf-8")
 SECURITY_CHECK = ROOT / "n6j0p" / "security-check.sh"
 SECURITY_CHECK_TEXT = SECURITY_CHECK.read_text(encoding="utf-8")
 COMPOSE = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
@@ -79,6 +80,14 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn('PANEL_LISTEN_IP:-0.0.0.0', INSTALL)
         # The wizard's explicit "Safe" choice still binds localhost.
         self.assertIn('PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-127.0.0.1}"', INSTALL)
+
+    def test_builtin_subscription_port_open_without_domain(self):
+        setup = XUI_BUILTIN_SUB.split("secure_firewall() {", 1)[1]
+        setup = setup.split("restart_xui_later() {", 1)[0]
+        self.assertIn('HTTPS_SITE_ENABLE:-0}" = "1"', setup)
+        self.assertIn('ufw deny "${XUI_BUILTIN_SUB_PORT}/tcp"', setup)
+        self.assertIn('ufw allow "${XUI_BUILTIN_SUB_PORT}/tcp"', setup)
+        self.assertIn("no domain for Caddy proxy", SECURITY_CHECK_TEXT)
 
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]

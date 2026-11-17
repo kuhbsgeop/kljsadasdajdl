@@ -127,15 +127,20 @@ check_firewall() {
     return
   fi
   pass "firewall: ufw is active"
-  local panel_port sub_port panel_listen
+  local panel_port sub_port panel_listen https_site
   panel_port="$(env_value PANEL_PORT)"
   sub_port="$(env_value XUI_BUILTIN_SUB_PORT)"
   panel_listen="$(env_value PANEL_LISTEN_IP)"
+  https_site="$(env_value HTTPS_SITE_ENABLE)"
   panel_port="${panel_port:-2053}"
   sub_port="${sub_port:-2096}"
   panel_listen="${panel_listen:-0.0.0.0}"
   if ufw_allows_port "$sub_port" tcp; then
-    fail "firewall: built-in subscription port ${sub_port}/tcp is allowed (it must stay local-only; Caddy is the public path)"
+    if [ "${https_site:-0}" = "1" ]; then
+      fail "firewall: built-in subscription port ${sub_port}/tcp is allowed (it must stay local-only; Caddy is the public path)"
+    else
+      warn "firewall: built-in subscription port ${sub_port}/tcp is publicly allowed (no domain for Caddy proxy; HTTP, unencrypted)"
+    fi
   else
     pass "firewall: built-in subscription port ${sub_port}/tcp is not publicly allowed"
   fi
