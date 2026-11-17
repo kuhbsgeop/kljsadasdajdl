@@ -4,7 +4,7 @@
 
 一键安装会在装完后自动做这些加固（无需手动操作）：
 
-- SSH：写 `/etc/ssh/sshd_config.d/00-3xui-hardening.conf`——密钥登录、最多 3 次认证尝试、30 秒登录宽限；只有确认 root 已有 `authorized_keys` 公钥时才关密码登录（`PasswordAuthentication no`、`KbdInteractiveAuthentication no`、`PermitRootLogin prohibit-password`），否则跳过关密码并打印醒目警告；写完 `sshd -t` 校验，通过才 reload。
+- SSH：写 `/etc/ssh/sshd_config.d/00-3xui-hardening.conf`——密钥登录、最多 3 次认证尝试、30 秒登录宽限；默认开密码登录（`SSH_PASSWORD_AUTH=1`，`PasswordAuthentication yes`、`PermitRootLogin yes`，方便手机客户端）；设 `SSH_PASSWORD_AUTH=0` 时才关密码（`PasswordAuthentication no`、`KbdInteractiveAuthentication no`、`PermitRootLogin prohibit-password`），且只有确认 root 已有 `authorized_keys` 公钥时才关，否则跳过并打印醒目警告；写完 `sshd -t` 校验，通过才 reload。
 - fail2ban（默认开，`ENABLE_FAIL2BAN=0` 可关）：sshd jail，`banaction=ufw`，10 分钟内 5 次失败封 1 小时；装不上或无 ufw 时跳过，不影响安装。
 - unattended-upgrades（默认开，`ENABLE_UNATTENDED_UPGRADES=0` 可关）：自动安装安全更新。
 - UFW：先放行 SSH（22 及当前 sshd 端口），再设默认拒绝并 `ufw --force enable`；启用后核实 active，否则打印醒目失败提示。

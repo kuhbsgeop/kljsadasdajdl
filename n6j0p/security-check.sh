@@ -81,7 +81,7 @@ check_ssh() {
   val="$(printf '%s' "$eff" | awk '$1 == "passwordauthentication" { print tolower($2); exit }')"
   case "$val" in
     no) pass "ssh: password authentication is off" ;;
-    *) fail "ssh: password authentication is still on (passwordauthentication=${val:-unknown})" ;;
+    *) warn "ssh: password authentication is on (SSH_PASSWORD_AUTH=1 default; use a strong password and keep fail2ban running)" ;;
   esac
   val="$(printf '%s' "$eff" | awk '$1 == "kbdinteractiveauthentication" { print tolower($2); exit }')"
   case "$val" in
@@ -96,7 +96,7 @@ check_ssh() {
     no)
       pass "ssh: root login is disabled (permitrootlogin=no)"
       ;;
-    *) fail "ssh: root password login is allowed (permitrootlogin=${val:-unknown})" ;;
+    *) warn "ssh: root password login is allowed (permitrootlogin=${val:-unknown}; use a strong root password)" ;;
   esac
   val="$(printf '%s' "$eff" | awk '$1 == "pubkeyauthentication" { print tolower($2); exit }')"
   case "$val" in

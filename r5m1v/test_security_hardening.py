@@ -66,6 +66,13 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn("authorized_keys", setup)
         self.assertIn("password login was NOT disabled", setup)
 
+    def test_ssh_password_auth_on_by_default(self):
+        setup = INSTALL.split("harden_ssh() {", 1)[1]
+        setup = setup.split("install_fail2ban() {", 1)[0]
+        self.assertIn("SSH_PASSWORD_AUTH:-1", setup)
+        self.assertIn("PasswordAuthentication yes", setup)
+        self.assertIn("PermitRootLogin yes", setup)
+
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]
         setup = setup.split("enable_unattended_upgrades() {", 1)[0]
@@ -86,6 +93,7 @@ class SecurityHardeningTests(unittest.TestCase):
     def test_hardening_toggles_persist_to_env(self):
         for key in (
             "ENABLE_SSH_HARDENING",
+            "SSH_PASSWORD_AUTH",
             "ENABLE_FAIL2BAN",
             "ENABLE_UNATTENDED_UPGRADES",
         ):

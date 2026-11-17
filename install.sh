@@ -27,7 +27,7 @@ INSTALL_ENV_OVERRIDE_KEYS=(
   ENABLE_RUSTDESK RUSTDESK_IMAGE RUSTDESK_DATA_DIR RUSTDESK_SERVER
   XUI_BUILTIN_SUB_ENABLE XUI_BUILTIN_ALL_NODES XUI_BUILTIN_JSON_ENABLE XUI_BUILTIN_CLASH_ENABLE
   ENABLE_PROTOCOL_GUARD PROTOCOL_GUARD_ACTION SAFE_PROTOCOLS REQUIRE_SECURE_TRANSPORT
-  ENABLE_SSH_HARDENING ENABLE_FAIL2BAN ENABLE_UNATTENDED_UPGRADES
+  ENABLE_SSH_HARDENING SSH_PASSWORD_AUTH ENABLE_FAIL2BAN ENABLE_UNATTENDED_UPGRADES
 )
 
 for key in "${INSTALL_ENV_OVERRIDE_KEYS[@]}"; do
@@ -268,8 +268,10 @@ harden_ssh() {
 
   mkdir -p "$conf_dir"
 
-  # Only disable password login when someone can still get in with a key.
-  # Otherwise a password-only install would lock its owner out.
+  # SSH_PASSWORD_AUTH=1 (default): password login stays ON so phone/Termius
+  # clients without a key can log in. Set SSH_PASSWORD_AUTH=0 to disable
+  # password login; that only applies when a root public key exists, so a
+  # password-only install never locks its owner out.
   # ROOT_AUTHORIZED_KEYS is a test hook; it defaults to the real path.
   local root_keys="${ROOT_AUTHORIZED_KEYS:-/root/.ssh/authorized_keys}"
   local has_key=0
@@ -285,13 +287,22 @@ harden_ssh() {
     cp -p "$conf_file" "$backup"
   fi
 
+  local password_auth="${SSH_PASSWORD_AUTH:-1}"
   {
     echo "# Managed by 3x-ui selfhost kit (install.sh harden_ssh)."
-    echo "# Key-only SSH login; see SECURITY.md."
+    if [ "$password_auth" = "1" ]; then
+      echo "# Password login is ON (SSH_PASSWORD_AUTH=1); see SECURITY.md."
+    else
+      echo "# Key-only SSH login; see SECURITY.md."
+    fi
     echo "PubkeyAuthentication yes"
     echo "MaxAuthTries 3"
     echo "LoginGraceTime 30"
-    if [ "$has_key" = "1" ]; then
+    if [ "$password_auth" = "1" ]; then
+      echo "PasswordAuthentication yes"
+      echo "KbdInteractiveAuthentication no"
+      echo "PermitRootLogin yes"
+    elif [ "$has_key" = "1" ]; then
       echo "PasswordAuthentication no"
       echo "KbdInteractiveAuthentication no"
       echo "PermitRootLogin prohibit-password"
@@ -335,10 +346,13 @@ harden_ssh() {
     systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || log "Could not reload sshd; restart it manually to apply SSH hardening."
   fi
 
-  if [ "$has_key" = "1" ]; then
+  if [ "$password_auth" = "1" ]; then
+    log "SSH hardened: password login is ON (SSH_PASSWORD_AUTH=1), max 3 auth tries, 30s grace time."
+    log "WARNING: Password login is enabled; use a strong root password. fail2ban (if installed) bans brute-force attempts."
+  elif [ "$has_key" = "1" ]; then
     log "SSH hardened: key-only login, max 3 auth tries, 30s grace time."
   else
-    log "WARNING: No SSH public key found for root; password login was NOT disabled."
+    log "WARNING: No SSH public key found for root; password login was NOT disabled (SSH_PASSWORD_AUTH=0 was requested but no key exists)."
     log "WARNING: Add your public key to /root/.ssh/authorized_keys, verify key login in a second session, then re-run the installer to disable password login."
   fi
 }
@@ -1030,6 +1044,7 @@ apply_existing_env_overrides() {
   ensure_env_var PROTOCOL_GUARD_ACTION "disable"
   ensure_env_var ENABLE_PROTOCOL_GUARD "1"
   ensure_env_var ENABLE_SSH_HARDENING "1"
+  ensure_env_var SSH_PASSWORD_AUTH "1"
   ensure_env_var ENABLE_FAIL2BAN "1"
   ensure_env_var ENABLE_UNATTENDED_UPGRADES "1"
   ensure_env_var SITE_HTTP_PORT "80"
@@ -1531,7 +1546,7 @@ $(if [ -s "${INSTALL_DIR}/runtime/reality-dest-sites.txt" ]; then awk '{ printf 
 
 16) Security hardening checklist
   Applied automatically by the installer:
-    - SSH key-only login (only when a root public key was present at install time)
+    - SSH password login ON by default (SSH_PASSWORD_AUTH=1); set 0 with a root public key present to disable it
     - fail2ban sshd jail (ufw ban, 5 failures in 10 min -> 1h ban)
     - unattended security updates
     - UFW enabled with default-deny incoming
