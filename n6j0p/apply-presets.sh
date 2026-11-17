@@ -8,7 +8,7 @@ cd "$ROOT_DIR"
 
 OVERRIDE_KEYS=(
   XUI_CONTAINER PANEL_PORT WEB_BASE_PATH SERVER_ADDR DOMAIN_NAMES SERVER_ALIASES DOMAIN_NODE_MODE
-  DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
+  DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP VLESS_NODE_COUNT
   REALITY_PORT REALITY_DEST_SITES REALITY_TARGET REALITY_SERVER_NAMES REALITY_SPIDER_X REALITY_MIN_CLIENT_VERSION
   ENABLE_HYSTERIA ENABLE_TROJAN ENABLE_SHADOWSOCKS ALLOW_SELF_SIGNED_TLS
   HYSTERIA_PORT TROJAN_PORT SHADOWSOCKS_PORT TLS_CERT_FILE TLS_KEY_FILE TLS_SERVER_NAME
@@ -311,18 +311,40 @@ safe_node_label() {
 }
 
 build_vless_domain_client_specs() {
-  local tmp domain safe email uuid sub_id idx port
+  local tmp domain safe orig_safe email uuid sub_id idx port
+  local -a domains=()
+  local -A seen=()
   tmp="$(mktemp)"
   sub_id="${ALL_NODES_SUB_ID:-$DEFAULT_SUB_ID}"
   idx=0
   : > "$tmp"
 
-  domain_node_values | while IFS= read -r domain; do
+  # Collect the domain values (one node per value).
+  while IFS= read -r domain; do
     [ -n "$domain" ] || continue
+    domains+=("$domain")
+  done < <(domain_node_values)
+
+  # Pad to VLESS_NODE_COUNT with the server IP so a no-domain install
+  # still gets multiple nodes (each on its own port, distinct Reality dest).
+  local want="${VLESS_NODE_COUNT:-10}"
+  [[ "$want" =~ ^[0-9]+$ ]] || want=10
+  [ "$want" -ge 1 ] || want=1
+  while [ "${#domains[@]}" -lt "$want" ]; do
+    domains+=("${SERVER_ADDR:-YOUR_SERVER_IP}")
+  done
+
+  for domain in "${domains[@]}"; do
     port="$(domain_port_for_index "$idx")"
-    idx=$((idx + 1))
     safe="$(safe_node_label "$domain")"
     [ -n "$safe" ] || safe="domain"
+    orig_safe="$safe"
+    if [ -n "${seen[$orig_safe]:-}" ]; then
+      # Same address reused for another node (padded IP entries): make
+      # the client email unique by appending the port.
+      safe="${orig_safe}-${port}"
+    fi
+    seen[$orig_safe]=1
     email="me-vless-${safe}-${PRESET_CLIENT_SUFFIX}"
     uuid="$(new_uuid)"
     jq -n \
@@ -332,6 +354,7 @@ build_vless_domain_client_specs() {
       --argjson port "$port" \
       --arg subId "$sub_id" \
       '{domain:$domain,email:$email,uuid:$uuid,port:$port,subId:$subId}' >> "$tmp"
+    idx=$((idx + 1))
   done
 
   if [ ! -s "$tmp" ]; then

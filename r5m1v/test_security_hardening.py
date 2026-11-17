@@ -111,6 +111,28 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn("enhanced-mode: redir-host", rules)
         self.assertIn("fallback-filter:", rules)
 
+    def test_vless_node_count_pads_no_domain_install(self):
+        specs = APPLY_PRESETS.split(
+            "build_vless_domain_client_specs() {", 1)[1]
+        specs = specs.split("build_trojan_domain_client_specs() {", 1)[0]
+        self.assertIn('VLESS_NODE_COUNT:-10', specs)
+        self.assertIn('domains+=("${SERVER_ADDR:-YOUR_SERVER_IP}")', specs)
+        self.assertIn('safe="${orig_safe}-${port}"', specs)
+        self.assertIn("VLESS_NODE_COUNT", APPLY_PRESETS.split(
+            "OVERRIDE_KEYS=(", 1)[1].split(")", 1)[0])
+
+    def test_reality_ports_cover_vless_node_count(self):
+        ports = INSTALL.split("domain_reality_ports() {", 1)[1]
+        ports = ports.split("domain_trojan_ports() {", 1)[0]
+        self.assertIn('VLESS_NODE_COUNT:-10', ports)
+        self.assertIn('[ "$want" -gt "$count" ] && count="$want"', ports)
+
+    def test_vless_node_count_is_configurable(self):
+        self.assertIn("VLESS_NODE_COUNT", INSTALL.split(
+            "INSTALL_ENV_OVERRIDE_KEYS=(", 1)[1].split(")", 1)[0])
+        self.assertIn('tty_prompt "Number of VLESS Reality nodes" "10"', INSTALL)
+        self.assertIn('ensure_env_var VLESS_NODE_COUNT "10"', INSTALL)
+
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]
         setup = setup.split("enable_unattended_upgrades() {", 1)[0]

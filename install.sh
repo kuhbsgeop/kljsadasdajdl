@@ -11,7 +11,7 @@ DEFAULT_REALITY_DEST_SITES="www.cloudflare.com,www.microsoft.com,www.apple.com,w
 
 INSTALL_ENV_OVERRIDE_KEYS=(
   PANEL_PORT PANEL_LISTEN_IP WEB_BASE_PATH
-  DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP
+  DOMAIN_NAMES SERVER_ALIASES SERVER_ADDR DOMAIN_NODE_MODE DOMAIN_PORT_MODE DOMAIN_PORT_START DOMAIN_PORT_STEP VLESS_NODE_COUNT
   RECREATE_ON_DOMAIN_UPDATE RECREATE_MANAGED_INBOUNDS
   ENABLE_ACME ACME_EMAIL ACME_SERVER ACME_FALLBACK_SERVER REQUIRE_DOMAIN_ORIGIN PUBLIC_IPV4 PUBLIC_IPV6 STRICT_DOMAIN_CERT USE_DOMAIN_FOR_LINKS HTTPS_SITE_ENABLE HTTPS_HTTP_MODE SITE_HTTPS_PORT AUTO_ENABLE_TROJAN
   ENABLE_TROJAN ENABLE_SHADOWSOCKS ENABLE_HYSTERIA ENABLE_AMAZON_GLOBAL
@@ -156,6 +156,9 @@ domain_reality_ports() {
   fi
   count="$(domain_node_values_for_ports | awk 'NF { count++ } END { print count + 0 }')"
   [ "$count" -gt 0 ] || count=1
+  local want="${VLESS_NODE_COUNT:-10}"
+  [[ "$want" =~ ^[0-9]+$ ]] || want=10
+  [ "$want" -gt "$count" ] && count="$want"
   base="${DOMAIN_PORT_START:-${REALITY_PORT:-443}}"
   step="${DOMAIN_PORT_STEP:-1}"
   [[ "$base" =~ ^[0-9]+$ ]] || base="${REALITY_PORT:-443}"
@@ -918,6 +921,7 @@ run_config_wizard() {
   PANEL_PORT="${PANEL_PORT:-$(tty_prompt "Panel port" "$default_panel_port")}"
   WEB_BASE_PATH="${WEB_BASE_PATH:-$(tty_prompt "Panel random path, without leading slash" "p$(random_hex 9)")}"
   REALITY_PORT="${REALITY_PORT:-$(tty_prompt "VLESS REALITY public port" "443")}"
+  VLESS_NODE_COUNT="${VLESS_NODE_COUNT:-$(tty_prompt "Number of VLESS Reality nodes" "10")}"
   dest_sites="$(tty_prompt "REALITY dest sites, comma-separated (one per node, rotated)" "${REALITY_DEST_SITES:-$DEFAULT_REALITY_DEST_SITES}")"
   REALITY_DEST_SITES="${REALITY_DEST_SITES:-$dest_sites}"
 
@@ -1077,6 +1081,7 @@ apply_existing_env_overrides() {
   server_addr_default="$(public_ip)"
   ensure_env_var SERVER_ADDR "${server_addr_default:-127.0.0.1}"
   ensure_env_var REALITY_PORT "443"
+  ensure_env_var VLESS_NODE_COUNT "10"
   ensure_env_var REALITY_TARGET "www.cloudflare.com:443"
   ensure_env_var REALITY_SERVER_NAMES "www.cloudflare.com,cloudflare.com"
   ensure_env_var REALITY_DEST_SITES "$DEFAULT_REALITY_DEST_SITES"
