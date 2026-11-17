@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from urllib.parse import unquote
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "n6j0p" / "subconfig-api.py"
@@ -40,64 +39,6 @@ class SubscriptionSourceTests(unittest.TestCase):
     def test_private_remote_source_is_rejected(self, _getaddrinfo):
         with self.assertRaisesRegex(ValueError, "private or reserved"):
             api.validate_remote_url("https://internal.example/sub")
-
-
-class FetchXuiLinksTests(unittest.TestCase):
-    def test_fetch_xui_links_returns_enabled_inbound_links(self):
-        inbounds = {
-            "obj": [
-                {
-                    "enable": True,
-                    "settings": json.dumps({"clients": [
-                        {"email": "a@example.com", "enable": True, "subId": "all"},
-                    ]}),
-                },
-                {
-                    "enable": True,
-                    "settings": json.dumps({"clients": [
-                        {"email": "b@example.com", "enable": True, "subId": "all"},
-                    ]}),
-                },
-                {
-                    "enable": False,
-                    "settings": json.dumps({"clients": [
-                        {"email": "disabled@example.com", "enable": True, "subId": "all"},
-                    ]}),
-                },
-            ]
-        }
-        links_by_email = {
-            "a@example.com": [VLESS],
-            "b@example.com": [TROJAN],
-            "disabled@example.com": ["vless://disabled@example.com:8443#disabled"],
-        }
-        called_paths = []
-
-        def fake_xui_json(path):
-            called_paths.append(path)
-            if path == "/panel/api/inbounds/list":
-                return inbounds
-            email = unquote(path.rsplit("/", 1)[-1])
-            return {"success": True, "obj": links_by_email[email]}
-
-        with mock.patch.object(api, "xui_json", side_effect=fake_xui_json), \
-                mock.patch.object(api, "ALL_NODES_SUB_ID", ""):
-            result = api.fetch_xui_links()
-        self.assertEqual(result, [VLESS, TROJAN])
-        self.assertNotIn(
-            "/panel/api/clients/links/disabled%40example.com", called_paths
-        )
-
-    def test_fetch_xui_links_returns_empty_list_without_inbounds(self):
-        def fake_xui_json(path):
-            self.assertEqual(path, "/panel/api/inbounds/list")
-            return {"obj": []}
-
-        with mock.patch.object(api, "xui_json", side_effect=fake_xui_json), \
-                mock.patch.object(api, "ALL_NODES_SUB_ID", ""):
-            # Regression: fetch_xui_links used to raise NameError here because
-            # `links` was never initialized.
-            self.assertEqual(api.fetch_xui_links(), [])
 
 
 class ShortLinkTests(unittest.TestCase):

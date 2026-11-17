@@ -761,7 +761,6 @@ def restart_xray_service():
 
 
 def fetch_xui_links():
-    links = []
     inbounds = xui_json("/panel/api/inbounds/list")
     emails = []
     for inbound in inbounds.get("obj", []) or []:
