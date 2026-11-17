@@ -133,7 +133,7 @@ check_firewall() {
   panel_listen="$(env_value PANEL_LISTEN_IP)"
   panel_port="${panel_port:-2053}"
   sub_port="${sub_port:-2096}"
-  panel_listen="${panel_listen:-127.0.0.1}"
+  panel_listen="${panel_listen:-0.0.0.0}"
   if ufw_allows_port "$sub_port" tcp; then
     fail "firewall: built-in subscription port ${sub_port}/tcp is allowed (it must stay local-only; Caddy is the public path)"
   else

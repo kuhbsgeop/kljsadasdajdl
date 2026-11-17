@@ -73,6 +73,13 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn("PasswordAuthentication yes", setup)
         self.assertIn("PermitRootLogin yes", setup)
 
+    def test_panel_binds_public_ip_by_default(self):
+        self.assertIn('ensure_env_var PANEL_LISTEN_IP "0.0.0.0"', INSTALL)
+        self.assertIn('bind_choice="$(tty_prompt "Choose panel exposure" "2")"', INSTALL)
+        self.assertIn('PANEL_LISTEN_IP:-0.0.0.0', INSTALL)
+        # The wizard's explicit "Safe" choice still binds localhost.
+        self.assertIn('PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-127.0.0.1}"', INSTALL)
+
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]
         setup = setup.split("enable_unattended_upgrades() {", 1)[0]

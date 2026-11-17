@@ -342,11 +342,11 @@ case "$cmd" in
       ./scripts/menu.sh --print
     else
       echo "Visual panel:"
-      echo "  Bind:      ${PANEL_LISTEN_IP:-127.0.0.1}:${PANEL_PORT:-2053}"
+      echo "  Bind:      ${PANEL_LISTEN_IP:-0.0.0.0}:${PANEL_PORT:-2053}"
       echo "  Path:      /${WEB_BASE_PATH:-panel}/"
       if [ "${HTTPS_SITE_ENABLE:-0}" = "1" ]; then
         echo "  Direct:    https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
-      elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+      elif [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "::" ]; then
         echo "  Direct:    http://${SERVER_ADDR:-your-server}:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"
       else
         echo "  Local:     http://127.0.0.1:${PANEL_PORT:-2053}/${WEB_BASE_PATH:-panel}/"

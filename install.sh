@@ -549,7 +549,7 @@ configure_firewall_ports() {
     [ -n "$reality_port" ] && ports+=("${reality_port}/tcp")
   done < <(domain_reality_ports)
 
-  if [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ]; then
+  if [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "0.0.0.0" ]; then
     ports+=("${PANEL_PORT:-2053}/tcp")
   fi
   if [ "${ENABLE_SHADOWSOCKS:-0}" = "1" ]; then
@@ -849,7 +849,7 @@ run_config_wizard() {
   tty_print "Panel exposure:"
   tty_print "  1) Safe: bind panel to 127.0.0.1 for local-only access"
   tty_print "  2) Public: bind panel to 0.0.0.0"
-  bind_choice="$(tty_prompt "Choose panel exposure" "1")"
+  bind_choice="$(tty_prompt "Choose panel exposure" "2")"
   if [ "$bind_choice" = "2" ]; then
     PANEL_LISTEN_IP="${PANEL_LISTEN_IP:-0.0.0.0}"
   else
@@ -1011,7 +1011,7 @@ apply_existing_env_overrides() {
   ensure_env_var XUI_IMAGE "ghcr.io/mhsanaei/3x-ui:latest"
   ensure_env_var XUI_CONTAINER "3xui"
   ensure_env_var PANEL_PORT "$(random_port)"
-  ensure_env_var PANEL_LISTEN_IP "127.0.0.1"
+  ensure_env_var PANEL_LISTEN_IP "0.0.0.0"
   ensure_env_var PANEL_USERNAME "admin_$(random_hex 4)"
   ensure_env_var PANEL_PASSWORD "$(random_password)"
   ensure_env_var WEB_BASE_PATH "p$(random_hex 9)"
@@ -1121,7 +1121,7 @@ XUI_IMAGE=${XUI_IMAGE:-ghcr.io/mhsanaei/3x-ui:latest}
 XUI_CONTAINER=${XUI_CONTAINER:-3xui}
 
 PANEL_PORT=${PANEL_PORT:-$(random_port)}
-PANEL_LISTEN_IP=${PANEL_LISTEN_IP:-127.0.0.1}
+PANEL_LISTEN_IP=${PANEL_LISTEN_IP:-0.0.0.0}
 PANEL_USERNAME=${PANEL_USERNAME:-admin_$(random_hex 4)}
 PANEL_PASSWORD=${PANEL_PASSWORD:-$(random_password)}
 WEB_BASE_PATH=${base_path}
@@ -1312,7 +1312,7 @@ configure_panel() {
   log "Hardening panel login, base path, and listen IP."
   docker exec "${XUI_CONTAINER:-3xui}" /app/x-ui setting \
     -port "${PANEL_PORT:-2053}" \
-    -listenIP "${PANEL_LISTEN_IP:-127.0.0.1}" \
+    -listenIP "${PANEL_LISTEN_IP:-0.0.0.0}" \
     -username "${PANEL_USERNAME:-admin}" \
     -password "${PANEL_PASSWORD:-$(random_password)}" \
     -webBasePath "$path_no_slash" >/dev/null
@@ -1337,7 +1337,7 @@ write_install_summary() {
     public_panel_url="https://${SERVER_ADDR:-your-server}/${WEB_BASE_PATH:-panel}/"
     access_url="$public_panel_url"
     access_note="Domain HTTPS mode is enabled; open the panel directly with the domain URL."
-  elif [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-127.0.0.1}" = "::" ]; then
+  elif [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "0.0.0.0" ] || [ "${PANEL_LISTEN_IP:-0.0.0.0}" = "::" ]; then
     access_url="$public_panel_url"
     access_note="Public IP HTTP mode is enabled; open the panel directly with the IP URL."
   else
@@ -1363,7 +1363,7 @@ write_install_summary() {
   ${INSTALL_DIR}
 
 2) Visual panel
-  Panel bind: ${PANEL_LISTEN_IP:-127.0.0.1}:${PANEL_PORT:-2053}
+  Panel bind: ${PANEL_LISTEN_IP:-0.0.0.0}:${PANEL_PORT:-2053}
   Panel path: /${WEB_BASE_PATH:-panel}/
   Username:   ${PANEL_USERNAME:-unknown}
   Password:   ${PANEL_PASSWORD:-unknown}
@@ -1476,7 +1476,7 @@ $(if [ -s "${INSTALL_DIR}/runtime/reality-dest-sites.txt" ]; then awk '{ printf 
   Public: open ${reality_ports:-${REALITY_PORT:-443}/tcp} for VLESS REALITY.
   Public: open ${trojan_ports:-${TROJAN_PORT:-9443}/tcp} for Trojan WS TLS when Trojan is enabled.
   Public: open ${ADSPOWER_PROXY_PORT:-31081}/tcp for AdsPower Socks5 when ENABLE_ADSPOWER_PROXY=1 and ADSPOWER_PROXY_LISTEN is public.
-  Private: keep ${PANEL_PORT:-2053}/tcp closed to public internet when PANEL_LISTEN_IP=127.0.0.1.
+  Public: open ${PANEL_PORT:-2053}/tcp for direct panel access (default; the panel binds 0.0.0.0). Keep it closed when PANEL_LISTEN_IP=127.0.0.1.
 
 10) Autostart
   Docker container restart policy: unless-stopped
