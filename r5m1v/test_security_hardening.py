@@ -133,6 +133,13 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn('tty_prompt "Number of VLESS Reality nodes" "10"', INSTALL)
         self.assertIn('ensure_env_var VLESS_NODE_COUNT "10"', INSTALL)
 
+    def test_fresh_env_persists_new_defaults(self):
+        heredoc = INSTALL.split("write_env() {", 1)[1]
+        heredoc = heredoc.split("cat > .env <<EOF", 1)[1]
+        heredoc = heredoc.split("\nEOF", 1)[0]
+        self.assertIn("VLESS_NODE_COUNT=${VLESS_NODE_COUNT:-10}", heredoc)
+        self.assertIn("SSH_PASSWORD_AUTH=${SSH_PASSWORD_AUTH:-1}", heredoc)
+
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]
         setup = setup.split("enable_unattended_upgrades() {", 1)[0]
