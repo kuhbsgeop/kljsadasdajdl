@@ -1146,7 +1146,7 @@ write_env() {
     return
   fi
 
-  local base_path default_addr first_configured_domain server_addr_default enable_acme_default strict_domain_default use_domain_default https_site_default https_http_default all_nodes_sub_id default_sub_id
+  local base_path default_addr first_configured_domain server_addr_default enable_acme_default strict_domain_default use_domain_default https_site_default https_http_default all_nodes_sub_id default_sub_id sub_listen_default
   local adspower_proxy_port_default adspower_proxy_user_default adspower_proxy_pass_default adspower_proxy_remark_default
   base_path="${WEB_BASE_PATH:-p$(random_hex 9)}"
   base_path="${base_path#/}"
@@ -1158,7 +1158,12 @@ write_env() {
   use_domain_default="${USE_DOMAIN_FOR_LINKS:-1}"
   https_site_default="${HTTPS_SITE_ENABLE:-0}"
   https_http_default="${HTTPS_HTTP_MODE:-reject}"
+  # No domain: no Caddy proxy, so the built-in subscription server must
+  # listen publicly for the direct :2096 link to work. With a domain,
+  # Caddy reverse-proxies it, so localhost-only is correct.
+  sub_listen_default="0.0.0.0"
   if [ -n "$first_configured_domain" ]; then
+    sub_listen_default="127.0.0.1"
     server_addr_default="$first_configured_domain"
     if [ "${ENABLE_ACME+x}" != "x" ]; then
       enable_acme_default=1
@@ -1289,7 +1294,7 @@ RECREATE_MANAGED_INBOUNDS=${RECREATE_MANAGED_INBOUNDS:-0}
 XUI_API_BASE=${XUI_API_BASE:-http://127.0.0.1:${PANEL_PORT:-2053}/${base_path}}
 XUI_API_TOKEN=${XUI_API_TOKEN:-}
 XUI_BUILTIN_SUB_ENABLE=${XUI_BUILTIN_SUB_ENABLE:-1}
-XUI_BUILTIN_SUB_LISTEN=${XUI_BUILTIN_SUB_LISTEN:-127.0.0.1}
+XUI_BUILTIN_SUB_LISTEN=${XUI_BUILTIN_SUB_LISTEN:-$sub_listen_default}
 XUI_BUILTIN_SUB_PORT=${XUI_BUILTIN_SUB_PORT:-2096}
 XUI_BUILTIN_SUB_PATH=${XUI_BUILTIN_SUB_PATH:-/xui-sub-$(random_hex 6)/}
 XUI_BUILTIN_ALL_NODES=${XUI_BUILTIN_ALL_NODES:-1}

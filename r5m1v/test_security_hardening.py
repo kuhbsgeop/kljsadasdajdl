@@ -146,6 +146,18 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertNotIn("HTTPS_SITE_ENABLE", fn)
         self.assertIn("xui-builtin-subscription.sh", fn)
 
+    def test_builtin_sub_listen_defaults_by_domain(self):
+        heredoc = INSTALL.split("write_env() {", 1)[1]
+        heredoc = heredoc.split("cat > .env <<EOF", 1)[1]
+        heredoc = heredoc.split("\nEOF", 1)[0]
+        self.assertIn(
+            "XUI_BUILTIN_SUB_LISTEN=${XUI_BUILTIN_SUB_LISTEN:-$sub_listen_default}",
+            heredoc)
+        setup = INSTALL.split("write_env() {", 1)[1]
+        setup = setup.split("cat > .env <<EOF", 1)[0]
+        self.assertIn('sub_listen_default="0.0.0.0"', setup)
+        self.assertIn('sub_listen_default="127.0.0.1"', setup)
+
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]
         setup = setup.split("enable_unattended_upgrades() {", 1)[0]
