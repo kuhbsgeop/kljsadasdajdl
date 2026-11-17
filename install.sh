@@ -190,6 +190,42 @@ need_root() {
   fi
 }
 
+# Drop SERVER_ALIASES entries that are neither an IP address nor a domain
+# that resolves in DNS. A node whose shareAddr does not resolve cannot be
+# reached by clients at all, so keeping it only produces broken nodes.
+# If every alias is dropped, SERVER_ALIASES is cleared so the install falls
+# back to DOMAIN_NAMES / SERVER_ADDR (the VPS IP).
+validate_server_aliases() {
+  load_env
+  local raw kept dropped value
+  raw="${SERVER_ALIASES:-}"
+  [ -n "$raw" ] || return 0
+  if ! command -v getent >/dev/null 2>&1; then
+    log "getent is not available; skipping SERVER_ALIASES DNS validation."
+    return 0
+  fi
+  kept=""
+  dropped=""
+  while IFS= read -r value; do
+    [ -n "$value" ] || continue
+    if getent hosts "$value" >/dev/null 2>&1; then
+      kept="${kept:+$kept,}$value"
+    else
+      dropped="${dropped:+$dropped,}$value"
+    fi
+  done < <(normalize_list_lines "$raw")
+  if [ -n "$dropped" ]; then
+    log "WARNING: dropping unresolvable SERVER_ALIASES (no DNS record): $dropped"
+  fi
+  if [ "$kept" != "$raw" ]; then
+    set_env_var SERVER_ALIASES "$kept"
+    SERVER_ALIASES="$kept"
+    if [ -z "$kept" ]; then
+      log "All SERVER_ALIASES were dropped; nodes will use DOMAIN_NAMES or the server IP."
+    fi
+  fi
+}
+
 install_pkg() {
   local pkgs=("$@")
   if command -v apt-get >/dev/null 2>&1; then
@@ -209,7 +245,7 @@ install_pkg() {
 
 ensure_base_tools() {
   local missing=()
-  for bin in curl openssl jq tar; do
+  for bin in curl openssl jq tar python3; do
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
@@ -505,6 +541,7 @@ download_project() {
     "scripts/reconcile.sh"
     "scripts/safe-update.sh"
     "scripts/subconfig-api.py"
+    "scripts/sync_rules_names.py"
     "subconfig-api/Dockerfile"
     "subconfig-api/requirements.txt"
     "scripts/start-services.sh"
@@ -674,6 +711,28 @@ configure_subscription() {
   log "Configuring subscription converter web UI."
   if ! (cd "$INSTALL_DIR" && ./scripts/subscription.sh); then
     log "Subscription converter setup did not fully complete. Retry later with: x-ui -> subscription menu"
+  fi
+}
+
+# Sync the real node names into the 3.5.yaml rules template (replacing the
+# template placeholders), so a fresh install's rendered subscription uses
+# the real node names. Runs after the subscription is refreshed; warns and
+# continues on failure (the subscription still works, just with
+# placeholder names).
+sync_rules_names() {
+  load_env
+  local script="${INSTALL_DIR}/scripts/sync_rules_names.py"
+  if [ ! -f "$script" ]; then
+    log "sync_rules_names.py not found; skipping rules-name sync."
+    return 0
+  fi
+  if [ ! -f "${INSTALL_DIR}/site/sub/config/3.5.yaml" ]; then
+    log "3.5.yaml not found; skipping rules-name sync."
+    return 0
+  fi
+  log "Syncing node names into the 3.5.yaml rules template."
+  if ! (cd "$INSTALL_DIR" && python3 scripts/sync_rules_names.py); then
+    log "WARNING: rules-name sync did not complete; the rendered subscription may use placeholder node names. Re-run later with: cd ${INSTALL_DIR} && python3 scripts/sync_rules_names.py"
   fi
 }
 
@@ -1592,6 +1651,7 @@ main() {
   install_cli_shortcut
   write_env
   load_env
+  validate_server_aliases
   generate_mask_site
   configure_firewall_ports
   harden_ssh
@@ -1620,6 +1680,7 @@ main() {
   configure_protocol_guard
   configure_xui_builtin_subscription
   configure_subscription
+  sync_rules_names
   configure_amazon_global
 
   write_install_summary

@@ -89,6 +89,28 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn('ufw allow "${XUI_BUILTIN_SUB_PORT}/tcp"', setup)
         self.assertIn("no domain for Caddy proxy", SECURITY_CHECK_TEXT)
 
+    def test_install_validates_server_aliases(self):
+        self.assertIn("validate_server_aliases() {", INSTALL)
+        self.assertIn('getent hosts "$value"', INSTALL)
+        self.assertIn("dropping unresolvable SERVER_ALIASES", INSTALL)
+        self.assertIn("set_env_var SERVER_ALIASES \"$kept\"", INSTALL)
+        self.assertIn("  validate_server_aliases\n", INSTALL)
+
+    def test_install_syncs_rules_names(self):
+        self.assertIn("sync_rules_names() {", INSTALL)
+        self.assertIn("scripts/sync_rules_names.py", INSTALL)
+        self.assertIn("  sync_rules_names\n", INSTALL)
+        self.assertIn('"scripts/sync_rules_names.py"', INSTALL)
+
+    def test_python3_is_a_base_tool(self):
+        self.assertIn("for bin in curl openssl jq tar python3; do", INSTALL)
+
+    def test_repo_rules_file_has_dns_block(self):
+        rules = (ROOT / "k4q8c" / "sub" / "config" / "3.5.yaml").read_text(encoding="utf-8")
+        self.assertIn("\ndns:\n", rules)
+        self.assertIn("enhanced-mode: redir-host", rules)
+        self.assertIn("fallback-filter:", rules)
+
     def test_fail2ban_jail_uses_ufw(self):
         setup = INSTALL.split("install_fail2ban() {", 1)[1]
         setup = setup.split("enable_unattended_upgrades() {", 1)[0]
